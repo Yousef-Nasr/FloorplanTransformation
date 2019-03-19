@@ -21,7 +21,7 @@ def main(options):
     if not os.path.exists(options.test_dir):
         os.system("mkdir -p %s"%options.test_dir)
         pass
-
+    #print('--------------------------------------', options.checkpoint_dir)
     dataset = FloorplanDataset(options, split='train', random=True)
 
     print('the number of images', len(dataset))    
@@ -54,9 +54,10 @@ def main(options):
         for sampleIndex, sample in enumerate(data_iterator):
             optimizer.zero_grad()
             
-            images, corner_gt, icon_gt, room_gt = sample[0].cuda(), sample[1].cuda(), sample[2].cuda(), sample[3].cuda()
+            images, corner_gt, icon_gt, room_gt, slant_gt = \
+                  sample[0].cuda(), sample[1].cuda(), sample[2].cuda(), sample[3].cuda(), sample[4].cuda()
 
-            corner_pred, icon_pred, room_pred = model(images)
+            corner_pred, icon_pred, room_pred, slant_pred = model(images)
             #print([(v.shape, v.min(), v.max()) for v in [corner_pred, icon_pred, room_pred, corner_gt, icon_gt, room_gt]])
             #exit(1)
             #print(corner_pred.shape, corner_gt.shape)
@@ -64,7 +65,8 @@ def main(options):
             corner_loss = torch.nn.functional.binary_cross_entropy(corner_pred, corner_gt)
             icon_loss = torch.nn.functional.cross_entropy(icon_pred.view(-1, NUM_ICONS + 2), icon_gt.view(-1))
             room_loss = torch.nn.functional.cross_entropy(room_pred.view(-1, NUM_ROOMS + 2), room_gt.view(-1))            
-            losses = [corner_loss, icon_loss, room_loss]
+            slant_loss = torch.nn.functional.binary_cross_entropy(slant_pred, slant_gt)
+            losses = [corner_loss, icon_loss, room_loss, slant_loss]
             loss = sum(losses)
 
             loss_values = [l.data.item() for l in losses]
@@ -102,13 +104,15 @@ def testOneEpoch(options, model, dataset):
     data_iterator = tqdm(dataloader, total=len(dataset) // options.batchSize + 1)
     for sampleIndex, sample in enumerate(data_iterator):
 
-        images, corner_gt, icon_gt, room_gt = sample[0].cuda(), sample[1].cuda(), sample[2].cuda(), sample[3].cuda()
+        images, corner_gt, icon_gt, room_gt, slant_gt = \
+                 sample[0].cuda(), sample[1].cuda(), sample[2].cuda(), sample[3].cuda(), sample[4].cuda()
         
-        corner_pred, icon_pred, room_pred = model(images)
+        corner_pred, icon_pred, room_pred, slant_pred = model(images)
         corner_loss = torch.nn.functional.binary_cross_entropy(corner_pred, corner_gt)
         icon_loss = torch.nn.functional.cross_entropy(icon_pred.view(-1, NUM_ICONS + 2), icon_gt.view(-1))
         room_loss = torch.nn.functional.cross_entropy(room_pred.view(-1, NUM_ROOMS + 2), room_gt.view(-1))            
-        losses = [corner_loss, icon_loss, room_loss]
+        slant_loss = torch.nn.functional.binary_cross_entropy(slant_pred, slant_gt)
+        losses = [corner_loss, icon_loss, room_loss, slant_loss]
         
         loss = sum(losses)
 

@@ -7,6 +7,7 @@ NUM_CORNERS = 21
 
 NUM_ICONS = 7
 NUM_ROOMS = 10
+NUM_SLANTS = 4
 POINT_ORIENTATIONS = [[(2, ), (3, ), (0, ), (1, )], [(0, 3), (0, 1), (1, 2), (2, 3)], [(1, 2, 3), (0, 2, 3), (0, 1, 3), (0, 1, 2)], [(0, 1, 2, 3)]]
 
 class ColorPalette:

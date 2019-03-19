@@ -9,7 +9,7 @@ from utils import *
 from skimage import measure
 import cv2
 import copy
-
+import math
 
 def lineRange(line):
     direction = calcLineDirection(line)
@@ -43,6 +43,13 @@ def mergeLines(line_1, line_2):
     else:
         return [(fixedValue, min(min_1, min_2)), (fixedValue, max(max_1, max_2))]
     return
+
+def findSlants(line, thres_angle):
+    if isManhattan(line):
+        return None
+    p0, p1 = line
+    h, v = p0[0] < p1[0], p0[1] < p1[1]
+    return (p0, (h, v)), (p1, (not h, not v))
 
 def findConnections(line_1, line_2, gap):
     connection_1 = -1
@@ -82,9 +89,17 @@ def findConnections(line_1, line_2, gap):
         return [2, 1], (fixedValue_2, fixedValue_1)
     return [2, 2], (fixedValue_2, fixedValue_1)
 
+def lines2Slants(lines, thres_angle):
+    slants = []
+    for line in lines:
+        s = findSlants(line, thres_angle)
+        if s:
+            slants.append(s[0])
+            slants.append(s[1])
+    return slants
+
 def lines2Corners(lines, gap):
     success = True
-    corners = []
     lineConnections = []
     for _ in range(len(lines)):
         lineConnections.append({})
@@ -286,6 +301,7 @@ class FloorplanDataset(Dataset):
             for line in info_file:
                 line = line.split('\t')
                 label = line[4].strip()
+                #print('--------------------------------------', label)
                 if label == 'wall':
                     walls.append((convertToPoint(line[0], line[1]), convertToPoint(line[2], line[3])))
                     wall_types.append(int(line[5].strip()) - 1)
@@ -294,6 +310,7 @@ class FloorplanDataset(Dataset):
                 else:
                     if label not in semantics:
                         semantics[label] = []
+                        #print('--------------------------------------', semantics)
                         pass
                     semantics[label].append((convertToPoint(line[0], line[1]), convertToPoint(line[2], line[3])))
                     pass
@@ -301,7 +318,10 @@ class FloorplanDataset(Dataset):
             pass
 
         gap = 5
+        thres_angle = math.pi/18
         #print(semantics)
+        #print('-------------------wall_types-------------------', wall_types)
+        #print('-------------------walls-------------------', walls)
         invalid_indices = {}
         for wall_index_1, (wall_1, wall_type_1) in enumerate(zip(walls, wall_types)):
             for wall_index_2, (wall_2, wall_type_2) in enumerate(zip(walls, wall_types)):
@@ -319,6 +339,7 @@ class FloorplanDataset(Dataset):
         wall_index = background_mask.min()
         background_colors = []
         if np.random.randint(2) == 0:
+            # dsc
             for pixel in [(0, 0), (0, background_mask.shape[0] - 1), (background_mask.shape[1] - 1, 0), (background_mask.shape[1] - 1, background_mask.shape[0] - 1)]:
                 index = background_mask[pixel[1]][pixel[0]]
                 if index != wall_index:
@@ -330,6 +351,10 @@ class FloorplanDataset(Dataset):
         #walls = connectWalls(walls, roomSegmentation, gap=gap)
         
         corners, success = lines2Corners(walls, gap=gap)
+        slants = lines2Slants(walls, thres_angle)
+        #print('------------------corners-------------------')
+        #print(corners)
+        #print('------------------corners-------------------')
         if not success:
             #print('warning', index, self.imagePaths[index][1])
             pass
@@ -342,6 +367,7 @@ class FloorplanDataset(Dataset):
             pass
         
         corners = [(transformPoint(transformation, corner[0]), corner[1]) for corner in corners]
+        slants = [(transformPoint(transformation, slant[0]), slant[1]) for slant in slants]
         walls = [[transformPoint(transformation, wall[c]) for c in range(2)] for wall in walls]
         doors = [[transformPoint(transformation, door[c]) for c in range(2)] for door in doors]        
         for semantic, items in semantics.items():
@@ -358,7 +384,11 @@ class FloorplanDataset(Dataset):
             continue
 
         rooms = measure.label(roomSegmentation == 0, background=0)
-        
+
+        slant_gt = []
+        for slant in slants:
+            slant_gt.append((slant[0][0], slant[0][1], slant[1][0]*2 + slant[1][1]))
+
         corner_gt = []
         for corner in corners:
             corner_gt.append((corner[0][0], corner[0][1], corner[1] + 1))
@@ -428,11 +458,14 @@ class FloorplanDataset(Dataset):
                 #exit(1)
                 pass
             continue
-
         cornerSegmentation = np.zeros((height, width, 21), dtype=np.uint8)
         for corner in corner_gt:
             cornerSegmentation[min(max(corner[1], 0), height - 1), min(max(corner[0], 0), width - 1), corner[2] - 1] = 1
             continue
+
+        slantSegmentation = np.zeros((height, width, 4), dtype=np.uint8)
+        for slant in slant_gt:
+            slantSegmentation[min(max(slant[1], 0), height - 1), min(max(slant[0], 0), width - 1), slant[2]] = 1
 
         if False:
             cv2.imwrite('test/image.png', image_ori)
@@ -450,5 +483,6 @@ class FloorplanDataset(Dataset):
         kernel[:, 1] = 1
         cornerSegmentation = cv2.dilate(cornerSegmentation, kernel, iterations=5)
 
-        sample = [image, cornerSegmentation.astype(np.float32), iconSegmentation.astype(np.int64), roomSegmentation.astype(np.int64)]
+        sample = [image, cornerSegmentation.astype(np.float32), iconSegmentation.astype(np.int64), 
+                  roomSegmentation.astype(np.int64), slantSegmentation.astype(np.float32)]
         return sample
