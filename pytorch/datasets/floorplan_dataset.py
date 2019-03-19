@@ -301,7 +301,6 @@ class FloorplanDataset(Dataset):
             for line in info_file:
                 line = line.split('\t')
                 label = line[4].strip()
-                #print('--------------------------------------', label)
                 if label == 'wall':
                     walls.append((convertToPoint(line[0], line[1]), convertToPoint(line[2], line[3])))
                     wall_types.append(int(line[5].strip()) - 1)
@@ -310,7 +309,6 @@ class FloorplanDataset(Dataset):
                 else:
                     if label not in semantics:
                         semantics[label] = []
-                        #print('--------------------------------------', semantics)
                         pass
                     semantics[label].append((convertToPoint(line[0], line[1]), convertToPoint(line[2], line[3])))
                     pass
@@ -319,9 +317,6 @@ class FloorplanDataset(Dataset):
 
         gap = 5
         thres_angle = math.pi/18
-        #print(semantics)
-        #print('-------------------wall_types-------------------', wall_types)
-        #print('-------------------walls-------------------', walls)
         invalid_indices = {}
         for wall_index_1, (wall_1, wall_type_1) in enumerate(zip(walls, wall_types)):
             for wall_index_2, (wall_2, wall_type_2) in enumerate(zip(walls, wall_types)):
@@ -339,7 +334,6 @@ class FloorplanDataset(Dataset):
         wall_index = background_mask.min()
         background_colors = []
         if np.random.randint(2) == 0:
-            # dsc
             for pixel in [(0, 0), (0, background_mask.shape[0] - 1), (background_mask.shape[1] - 1, 0), (background_mask.shape[1] - 1, background_mask.shape[0] - 1)]:
                 index = background_mask[pixel[1]][pixel[0]]
                 if index != wall_index:
@@ -352,9 +346,6 @@ class FloorplanDataset(Dataset):
         
         corners, success = lines2Corners(walls, gap=gap)
         slants = lines2Slants(walls, thres_angle)
-        #print('------------------corners-------------------')
-        #print(corners)
-        #print('------------------corners-------------------')
         if not success:
             #print('warning', index, self.imagePaths[index][1])
             pass
