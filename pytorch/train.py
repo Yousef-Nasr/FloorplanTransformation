@@ -21,7 +21,6 @@ def main(options):
     if not os.path.exists(options.test_dir):
         os.system("mkdir -p %s"%options.test_dir)
         pass
-    #print('--------------------------------------', options.checkpoint_dir)
     dataset = FloorplanDataset(options, split='train', random=True)
 
     print('the number of images', len(dataset))    
