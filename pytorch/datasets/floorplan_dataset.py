@@ -9,18 +9,55 @@ from utils import *
 from skimage import measure
 import cv2
 import copy
-import math
+from shapely.geometry import LineString
+
 
 def lineRange(line):
     direction = calcLineDirection(line)
-    fixedValue = (line[0][1 - direction] + line[1][1 - direction]) // 2
-    minValue = min(line[0][direction], line[1][direction])
-    maxValue = max(line[0][direction], line[1][direction])
-    return direction, fixedValue, minValue, maxValue
+    if direction < 2:
+        fixedValue = (line[0][1 - direction] + line[1][1 - direction]) // 2
+        minValue = min(line[0][direction], line[1][direction])
+        maxValue = max(line[0][direction], line[1][direction])
+        return direction, True, fixedValue, minValue, maxValue
+    else:
+        return direction, False, None, None, None
 
 def pointDistance(point_1, point_2):
-    #return np.sqrt(pow(point_1[0] - point_2[0], 2) + pow(point_1[1] - point_2[1], 2))
     return max(abs(point_1[0] - point_2[0]), abs(point_1[1] - point_2[1]))
+
+# Euclidean distance between two points
+def p2p(p1, p2):
+    return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
+
+# distance between point and line
+def p2l(p, l):
+    return min(pointDistance(p, l[i]) for i in range(2))
+
+# distance between line and line
+def l2l(l1, l2):
+    return min(pointDistance(l1[i], l2[j]) for i in range(2) for j in range(2))
+
+# intersection point between two lines
+def line(p1, p2):
+    A = (p1[1] - p2[1])
+    B = (p2[0] - p1[0])
+    C = (p1[0]*p2[1] - p2[0]*p1[1])
+    return A, B, -C
+
+def intersection(L1, L2):
+    D  = L1[0] * L2[1] - L1[1] * L2[0]
+    Dx = L1[2] * L2[1] - L1[1] * L2[2]
+    Dy = L1[0] * L2[2] - L1[2] * L2[0]
+    if D != 0:
+        x = Dx / D
+        y = Dy / D
+        return x,y
+    else:
+        return False
+
+# check if point in a line
+def pInLine(p, l, gap):
+    return abs(p2p(p, l[0]) + p2p(p, l[1]) - p2p(*l)) < gap*2
 
 def divideWalls(walls):
     horizontalWalls = []
@@ -35,75 +72,97 @@ def divideWalls(walls):
     return horizontalWalls, verticalWalls
 
 def mergeLines(line_1, line_2):
-    direction_1, fixedValue_1, min_1, max_1 = lineRange(line_1)
-    direction_2, fixedValue_2, min_2, max_2 = lineRange(line_2)
-    fixedValue = (fixedValue_1 + fixedValue_2) // 2
-    if direction_1 == 0:
-        return [(min(min_1, min_2), fixedValue), (max(max_1, max_2), fixedValue)]
+    direction_1, isMan_1, fixedValue_1, min_1, max_1 = lineRange(line_1)
+    direction_2, _, fixedValue_2, min_2, max_2 = lineRange(line_2)
+    if isMan_1:
+        fixedValue = (fixedValue_1 + fixedValue_2) // 2
+        if direction_1 == 0:
+            return [(min(min_1, min_2), fixedValue), (max(max_1, max_2), fixedValue)]
+        else:
+            return [(fixedValue, min(min_1, min_2)), (fixedValue, max(max_1, max_2))]
     else:
-        return [(fixedValue, min(min_1, min_2)), (fixedValue, max(max_1, max_2))]
-    return
-
-def findSlants(line, thres_angle):
-    if isManhattan(line):
-        return None
-    p0, p1 = line
-    h, v = p0[0] < p1[0], p0[1] < p1[1]
-    return (p0, (h, v)), (p1, (not h, not v))
+        if direction_1 == 3:
+            return [(min(line_1[0][0], line_2[1][0]), min(line_1[0][1], line_2[1][1])), 
+                    (min(line_1[0][0], line_2[1][0]), min(line_1[0][1], line_2[1][1]))]
+        else:
+            return [(max(line_1[0][0], line_2[1][0]), min(line_1[0][1], line_2[1][1])), 
+                    (min(line_1[0][0], line_2[1][0]), max(line_1[0][1], line_2[1][1]))]
 
 def findConnections(line_1, line_2, gap):
-    connection_1 = -1
-    connection_2 = -1
-    pointConnected = False
-    for c_1 in range(2):
+    direction_1, isMan_1, fixedValue_1, min_1, max_1 = lineRange(line_1)
+    direction_2, isMan_2, fixedValue_2, min_2, max_2 = lineRange(line_2)
+
+    if isMan_1 and isMan_2:
+
+        connection_1 = -1
+        connection_2 = -1
+        pointConnected = False
+        for c_1 in range(2):
+            if pointConnected:
+                break
+            for c_2 in range(2):
+                if pointDistance(line_1[c_1], line_2[c_2]) > gap:
+                    continue
+
+                connection_1 = c_1
+                connection_2 = c_2
+                connectionPoint = ((line_1[c_1][0] + line_2[c_2][0]) // 2, (line_1[c_1][1] + line_2[c_2][1]) // 2)
+                pointConnected = True
+                break
+            continue
         if pointConnected:
-            break
-        for c_2 in range(2):
-            if pointDistance(line_1[c_1], line_2[c_2]) > gap:
-                continue
+            return [connection_1, connection_2], connectionPoint
+        direction_1, isMan_1, fixedValue_1, min_1, max_1 = lineRange(line_1)
+        direction_2, isMan_2, fixedValue_2, min_2, max_2 = lineRange(line_2)
+        if direction_1 == direction_2:
+            return [-1, -1], (0, 0)
 
-            connection_1 = c_1
-            connection_2 = c_2
-            connectionPoint = ((line_1[c_1][0] + line_2[c_2][0]) // 2, (line_1[c_1][1] + line_2[c_2][1]) // 2)
-            pointConnected = True
-            break
-        continue
-    if pointConnected:
-        return [connection_1, connection_2], connectionPoint
-    direction_1, fixedValue_1, min_1, max_1 = lineRange(line_1)
-    direction_2, fixedValue_2, min_2, max_2 = lineRange(line_2)
-    if direction_1 == direction_2:
+        if min(fixedValue_1, max_2) < max(fixedValue_1, min_2) - gap or min(fixedValue_2, max_1) < max(fixedValue_2, min_1) - gap:
+            return [-1, -1], (0, 0)
+        if abs(min_1 - fixedValue_2) <= gap:
+            return [0, 2], (fixedValue_2, fixedValue_1)
+        if abs(max_1 - fixedValue_2) <= gap:
+            return [1, 2], (fixedValue_2, fixedValue_1)
+        if abs(min_2 - fixedValue_1) <= gap:
+            return [2, 0], (fixedValue_2, fixedValue_1)
+        if abs(max_2 - fixedValue_1) <= gap:
+            return [2, 1], (fixedValue_2, fixedValue_1)
+        return [2, 2], (fixedValue_2, fixedValue_1)
+    else:
+        def p2d(c, ps):
+            d = []
+            for p in ps:
+                direction = calcLineDirection((p, c))
+                if direction == 0:
+                    d.append(2 if p[0] > c[0] else 0)
+                elif direction == 1:
+                    d.append(1 if p[1] > c[1] else 3)
+                elif direction == 2:
+                    d.append(6 if p[0] > c[0] and p[1] > c[1] else 4)
+                else:
+                    d.append(7 if p[0] > c[0] and p[1] < c[1] else 5)
+            return d
+
+        #print('-'*20, line_1, line_2)
+        l1, l2 = line(*line_1), line(*line_2)
+        p = intersection(l1, l2)
+        w1, w2 = pInLine(p, line_1, gap), pInLine(p, line_2, gap)
+
+        if not w1 and not w2 and l2l(line_1, line_2) < gap:
+            return p2d(p, [line_1[0], line_2[0]]), p
+        elif w1 and not w2 and p2l(p, line_2) < gap:
+            return p2d(p, [line_1[0], line_1[1], line_2[0]]), p
+        elif not w1 and w2 and p2l(p, line_1) < gap:
+            return p2d(p, [line_1[0], line_2[1], line_2[0]]), p
+        elif w1 and w2:
+            ps = [l[i] for l in [line_1, line_2] for i in range(2) if pointDistance(p, l[i]) >= gap]
+            assert len(ps) > 1, 'Number of points is not enough !'
+            return p2d(p, ps), p
+
         return [-1, -1], (0, 0)
-
-    #print(fixedValue_1, min_1, max_1, fixedValue_2, min_2, max_2)
-    if min(fixedValue_1, max_2) < max(fixedValue_1, min_2) - gap or min(fixedValue_2, max_1) < max(fixedValue_2, min_1) - gap:
-        return [-1, -1], (0, 0)
-
-    if abs(min_1 - fixedValue_2) <= gap:
-        return [0, 2], (fixedValue_2, fixedValue_1)
-    if abs(max_1 - fixedValue_2) <= gap:
-        return [1, 2], (fixedValue_2, fixedValue_1)
-    if abs(min_2 - fixedValue_1) <= gap:
-        return [2, 0], (fixedValue_2, fixedValue_1)
-    if abs(max_2 - fixedValue_1) <= gap:
-        return [2, 1], (fixedValue_2, fixedValue_1)
-    return [2, 2], (fixedValue_2, fixedValue_1)
-
-def lines2Slants(lines, thres_angle):
-    slants = []
-    for line in lines:
-        s = findSlants(line, thres_angle)
-        if s:
-            slants.append(s[0])
-            slants.append(s[1])
-    return slants
 
 def lines2Corners(lines, gap):
     success = True
-    lineConnections = []
-    for _ in range(len(lines)):
-        lineConnections.append({})
-        continue
 
     connectionCornerMap = {}
     connectionCornerMap[(1, 1)] = 4
@@ -115,36 +174,85 @@ def lines2Corners(lines, gap):
     connectionCornerMap[(2, 1)] = 10
     connectionCornerMap[(0, 2)] = 11
     connectionCornerMap[(2, 2)] = 12
+    # slant patterns
+    connectionCornerMap[(2, 4)] = 13
+    connectionCornerMap[(3, 5)] = 14
+    connectionCornerMap[(0, 6)] = 15
+    connectionCornerMap[(1, 7)] = 16
+
+    connectionCornerMap[(2, 5)] = 17
+    connectionCornerMap[(3, 6)] = 18
+    connectionCornerMap[(0, 7)] = 19
+    connectionCornerMap[(1, 4)] = 20
+
+    connectionCornerMap[(5, 6)] = 21
+    connectionCornerMap[(6, 7)] = 22
+    connectionCornerMap[(4, 7)] = 23
+    connectionCornerMap[(4, 5)] = 24
+
+    connectionCornerMap[(0, 5)] = 25
+    connectionCornerMap[(2, 6)] = 26
+    connectionCornerMap[(2, 7)] = 27
+    connectionCornerMap[(0, 4)] = 28
+ 
+    connectionCornerMap[(3, 4)] = 29
+    connectionCornerMap[(3, 7)] = 30
+    connectionCornerMap[(1, 5)] = 31
+    connectionCornerMap[(1, 6)] = 32
+
+
+    connectionCornerMap[(0, 2, 4)] = 33
+    connectionCornerMap[(0, 2, 7)] = 34
+    connectionCornerMap[(0, 2, 5)] = 35
+    connectionCornerMap[(0, 2, 6)] = 36
+
+    connectionCornerMap[(2, 4, 6)] = 37
+    connectionCornerMap[(2, 5, 7)] = 38
+    connectionCornerMap[(0, 5, 7)] = 39
+    connectionCornerMap[(0, 4, 6)] = 40
+
+    connectionCornerMap[(1, 3, 4)] = 41
+    connectionCornerMap[(1, 3, 5)] = 42
+    connectionCornerMap[(1, 3, 7)] = 43
+    connectionCornerMap[(1, 3, 6)] = 44
+
+    connectionCornerMap[(1, 4, 6)] = 45
+    connectionCornerMap[(1, 5, 7)] = 46
+    connectionCornerMap[(3, 5, 7)] = 47
+    connectionCornerMap[(3, 4, 6)] = 48
+
+    connectionCornerMap[(4, 5, 7)] = 49
+    connectionCornerMap[(5, 6, 7)] = 50
+    connectionCornerMap[(4, 6, 7)] = 51
+    connectionCornerMap[(4, 5, 6)] = 52
+
+    connectionCornerMap[(1, 3, 4, 6)] = 53
+    connectionCornerMap[(1, 3, 5, 7)] = 54
+    connectionCornerMap[(0, 2, 4, 6)] = 55
+    connectionCornerMap[(0, 2, 5, 7)] = 56
+    connectionCornerMap[(4, 5, 6, 7)] = 57
+
+
     corners = []
-    for lineIndex_1, line_1 in enumerate(lines):
-        for lineIndex_2, line_2 in enumerate(lines):
-            if lineIndex_2 == lineIndex_1:
+    for lineIndex_1 in range(len(lines)-1):
+        for lineIndex_2 in range(lineIndex_1+1, len(lines)):
+            line_1, line_2 = lines[lineIndex_1], lines[lineIndex_2]
+
+            if calcLineDirection(line_1) == calcLineDirection(line_2):
                 continue
+            
             connections, connectionPoint = findConnections(line_1, line_2, gap=gap)
             if connections[0] == -1 and connections[1] == -1:
                 continue
-            if calcLineDirection(line_1) == calcLineDirection(line_2) and isManhattan(line_1) and isManhattan(line_2):
-                #print('overlap', line_1, line_2, connections)
-                success = False
-                #exit(1)                
-                continue
-            if calcLineDirection(line_1) == 1:
-                continue
-
-            indices = [lineIndex_1, lineIndex_2]
-            #print(lineIndex_1, lineIndex_2, connections)
-            for c in range(2):
-                if connections[c] in [0, 1] and connections[c] in lineConnections[indices[c]] and isManhattan(line_1) and isManhattan(line_2):
-                    #print('duplicate corner', line_1, line_2, connections)
-                    success = False
-                    #exit(1)                    
-                    continue
-
-                lineConnections[indices[c]][connections[c]] = True
-                continue
-            corners.append((connectionPoint, connectionCornerMap[tuple(connections)]))
+            if not isManhattan(line_1) or not isManhattan(line_2):
+                connections = sorted(connections)
+            try:
+                corners.append((connectionPoint, connectionCornerMap[tuple(connections)]))
+            except:
+                #print('-'*20, connections, line_1, line_2)
+                 pass
+            #print('-'*20, connections, line_1, line_2)
             continue
-        continue
     return corners, success
 
 def getRoomLabelMap():
@@ -315,8 +423,8 @@ class FloorplanDataset(Dataset):
                 continue
             pass
 
-        gap = 5
-        thres_angle = math.pi/18
+        gap = 3
+        #print(semantics)
         invalid_indices = {}
         for wall_index_1, (wall_1, wall_type_1) in enumerate(zip(walls, wall_types)):
             for wall_index_2, (wall_2, wall_type_2) in enumerate(zip(walls, wall_types)):
@@ -345,7 +453,6 @@ class FloorplanDataset(Dataset):
         #walls = connectWalls(walls, roomSegmentation, gap=gap)
         
         corners, success = lines2Corners(walls, gap=gap)
-        slants = lines2Slants(walls, thres_angle)
         if not success:
             #print('warning', index, self.imagePaths[index][1])
             pass
@@ -358,7 +465,6 @@ class FloorplanDataset(Dataset):
             pass
         
         corners = [(transformPoint(transformation, corner[0]), corner[1]) for corner in corners]
-        slants = [(transformPoint(transformation, slant[0]), slant[1]) for slant in slants]
         walls = [[transformPoint(transformation, wall[c]) for c in range(2)] for wall in walls]
         doors = [[transformPoint(transformation, door[c]) for c in range(2)] for door in doors]        
         for semantic, items in semantics.items():
@@ -375,11 +481,7 @@ class FloorplanDataset(Dataset):
             continue
 
         rooms = measure.label(roomSegmentation == 0, background=0)
-
-        slant_gt = []
-        for slant in slants:
-            slant_gt.append((slant[0][0], slant[0][1], slant[1][0]*2 + slant[1][1]))
-
+        
         corner_gt = []
         for corner in corners:
             corner_gt.append((corner[0][0], corner[0][1], corner[1] + 1))
@@ -389,7 +491,11 @@ class FloorplanDataset(Dataset):
         for opening in doors:
             direction = calcLineDirection(opening)
             for cornerIndex, corner in enumerate(opening):
-                corner_gt.append((int(round(corner[0])), int(round(corner[1])), 14 + openingCornerMap[direction][cornerIndex]))
+                try:
+                    corner_gt.append((int(round(corner[0])), int(round(corner[1])), 14 + openingCornerMap[direction][cornerIndex]))
+                except:
+                   # print(''*20, direction, opening)
+                    pass
                 continue
             continue
 
@@ -449,14 +555,11 @@ class FloorplanDataset(Dataset):
                 #exit(1)
                 pass
             continue
-        cornerSegmentation = np.zeros((height, width, 21), dtype=np.uint8)
+
+        cornerSegmentation = np.zeros((height, width, 66), dtype=np.uint8)
         for corner in corner_gt:
             cornerSegmentation[min(max(corner[1], 0), height - 1), min(max(corner[0], 0), width - 1), corner[2] - 1] = 1
             continue
-
-        slantSegmentation = np.zeros((height, width, 4), dtype=np.uint8)
-        for slant in slant_gt:
-            slantSegmentation[min(max(slant[1], 0), height - 1), min(max(slant[0], 0), width - 1), slant[2]] = 1
 
         if False:
             cv2.imwrite('test/image.png', image_ori)
@@ -474,6 +577,5 @@ class FloorplanDataset(Dataset):
         kernel[:, 1] = 1
         cornerSegmentation = cv2.dilate(cornerSegmentation, kernel, iterations=5)
 
-        sample = [image, cornerSegmentation.astype(np.float32), iconSegmentation.astype(np.int64), 
-                  roomSegmentation.astype(np.int64), slantSegmentation.astype(np.float32)]
+        sample = [image, cornerSegmentation.astype(np.float32), iconSegmentation.astype(np.int64), roomSegmentation.astype(np.int64)]
         return sample

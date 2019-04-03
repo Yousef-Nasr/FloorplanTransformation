@@ -54,6 +54,25 @@ iconNames = getIconNames()
 iconNameNumberMap = dict(zip(iconNames, range(len(iconNames))))
 iconNumberNameMap = dict(zip(range(len(iconNames)), iconNames))
 
+def get_pt(i):
+  if i < 4:
+    return 0
+  elif i < 28:
+    return 1
+  elif i < 52:
+    return 2
+  else:
+    return 3
+
+def get_ori(i):
+  if i < 4:
+    return i
+  elif i < 28:
+    return i-4
+  elif i < 52:
+    return i-28
+  else:
+    return i-52
 
 ## Extract corners from corner heatmp predictions
 def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False, gt=False):
@@ -71,7 +90,7 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
   elif cornerType == 'door':
     cornerOrientations = POINT_ORIENTATIONS[0]
   else:
-    cornerOrientations = POINT_ORIENTATIONS[1]
+    cornerOrientations = [(0, 3), (0, 1), (1, 2), (2, 3)]#POINT_ORIENTATIONS[1]
     pass
   #print(orientationPoints)
   if augment:
@@ -85,35 +104,40 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
     for orientationIndex, corners in enumerate(orientationPoints):
       if len(corners) > 3:
         continue #skip aug
-      pointType = orientationIndex // 4
+      #pointType = orientationIndex // 4
+      pointType = get_pt(orientationIndex)
+
       if pointType in [2]:
-        orientation = orientationIndex % 4
+        #orientation = orientationIndex % 4
+        orientation = get_ori(orientationIndex)
         orientations = POINT_ORIENTATIONS[pointType][orientation]
         for i in range(len(orientations)):
           newOrientations = list(orientations)
           newOrientations.remove(orientations[i])
-          newOrientations = tuple(newOrientations)
+          newOrientations = tuple(sorted(newOrientations))
           if not newOrientations in orientationMap:
             continue
           newOrientation = orientationMap[newOrientations]
           for corner in corners:
-            orientationPoints[(pointType - 1) * 4 + newOrientation].append(corner + (True, ))
+            #print('-'*20, corner, corner + (True, ))
+            orientationPoints[4 + newOrientation].append(corner + (True, ))
             continue
           continue
       elif pointType in [1]:
-        orientation = orientationIndex % 4
+        #orientation = orientationIndex % 4
+        orientation = get_ori(orientationIndex)
         orientations = POINT_ORIENTATIONS[pointType][orientation]
-        for orientation in range(4):
+        for orientation in range(8):
           if orientation in orientations:
             continue
           newOrientations = list(orientations)
           newOrientations.append(orientation)
-          newOrientations = tuple(newOrientations)
+          newOrientations = tuple(sorted(newOrientations))
           if not newOrientations in orientationMap:
             continue
           newOrientation = orientationMap[newOrientations]
           for corner in corners:
-            orientationPoints[(pointType + 1) * 4 + newOrientation].append(corner + (True, ))
+            orientationPoints[28 + newOrientation].append(corner + (True, ))
             continue
           continue
         pass
@@ -138,7 +162,7 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
     pointOffset += len(corners)
 
     if cornerType == 'wall':
-      points += [[corner[0][0], corner[0][1], orientationIndex // 4, orientationIndex % 4] for corner in corners]
+      points += [[corner[0][0], corner[0][1], get_pt(orientationIndex), get_ori(orientationIndex)] for corner in corners]
     elif cornerType == 'door':
       points += [[corner[0][0], corner[0][1], 0, orientationIndex] for corner in corners]
     else:
@@ -155,13 +179,18 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
   for orientationIndex, corners in enumerate(orientationPoints):
     orientations = cornerOrientations[orientationIndex]
     for orientation in orientations:
-      if orientation not in [1, 2]:
-        continue
-      oppositeOrientation = (orientation + 2) % 4
-      lineDim = -1
-      if orientation == 0 or orientation == 2:
-        lineDim = 1
+      #if orientation not in [1, 2]: continue
+      if orientation < 4:
+          oppositeOrientation = (orientation + 2) % 4
+      elif orientation < 6:
+          oppositeOrientation = orientation + 2
       else:
+          oppositeOrientation = orientation - 2
+      if orientation > 3: continue
+      lineDim = -1
+      if orientation in [0, 2]:
+        lineDim = 1
+      elif orientation in [1, 3]:
         lineDim = 0
         pass
 
@@ -171,11 +200,15 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
         if len(corner) > 3:
           augmentedPointMask[pointIndex] = True
           pass
-        ranges = copy.deepcopy(ORIENTATION_RANGES[orientation])
-        ranges[lineDim] = min(ranges[lineDim], corner[0][lineDim])
-        ranges[lineDim + 2] = max(ranges[lineDim + 2], corner[0][lineDim])
-        ranges[1 - lineDim] = min(ranges[1 - lineDim], corner[1][1 - lineDim] - gap)
-        ranges[1 - lineDim + 2] = max(ranges[1 - lineDim + 2], corner[2][1 - lineDim] + gap)
+        if orientation < 4:
+          ranges = copy.deepcopy(ORIENTATION_RANGES[orientation])
+          ranges[lineDim] = min(ranges[lineDim], corner[0][lineDim])
+          ranges[lineDim + 2] = max(ranges[lineDim + 2], corner[0][lineDim])
+          ranges[1 - lineDim] = min(ranges[1 - lineDim], corner[1][1 - lineDim] - gap)
+          ranges[1 - lineDim + 2] = max(ranges[1 - lineDim + 2], corner[2][1 - lineDim] + gap)
+        else:
+          print('-'*20, orientation, ranges)
+          pass
 
         for oppositeOrientationIndex, oppositeCorners in enumerate(orientationPoints):
           if oppositeOrientation not in cornerOrientations[oppositeOrientationIndex]:
@@ -186,26 +219,13 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
 
             oppositePointIndex = pointOffsets[oppositeOrientationIndex] + oppositeCornerIndex
 
-            if oppositeCorner[0][lineDim] < ranges[lineDim] or oppositeCorner[0][lineDim] > ranges[lineDim + 2] or ranges[1 - lineDim] > oppositeCorner[2][1 - lineDim] or ranges[1 - lineDim + 2] < oppositeCorner[1][1 - lineDim]:
-              continue
+            if orientation < 4:
+              if oppositeCorner[0][lineDim] < ranges[lineDim] or oppositeCorner[0][lineDim] > ranges[lineDim + 2] or ranges[1 - lineDim] > oppositeCorner[2][1 - lineDim] or ranges[1 - lineDim + 2] < oppositeCorner[1][1 - lineDim]:
+                continue
 
-            if abs(oppositeCorner[0][lineDim] - corner[0][lineDim]) < LENGTH_THRESHOLDS[cornerType]:
-              continue
-            '''
-            if pointDistance(corner[0], oppositeCorner[0]) < LENGTH_THRESHOLDS[cornerType]: continue
 
-            if orientation == 0 and (oppositeCorner[2][0] + gap >= corner[1][0] or abs(oppositeCorner[0][1] - corner[0][1]) < LENGTH_THRESHOLDS[cornerType]): continue
-            if orientation == 2 and (oppositeCorner[1][0] - gap <= corner[2][0] or abs(oppositeCorner[0][1] - corner[0][1]) < LENGTH_THRESHOLDS[cornerType]): continue
-            if orientation == 1 and (oppositeCorner[1][1] - gap <= corner[2][1] or abs(oppositeCorner[0][0] - corner[0][0]) < LENGTH_THRESHOLDS[cornerType]): continue
-            if orientation == 3 and (oppositeCorner[2][1] + gap >= corner[1][1] or abs(oppositeCorner[0][0] - corner[0][0]) < LENGTH_THRESHOLDS[cornerType]): continue
-
-            '''
-            #print('-'*20)
-            #print(orientation, oppositeOrientation, lineDim)
-            #print(ranges, oppositeCorner)
-            #print(corner)
-            #print('-'*20)
-            #exit(0)
+              if abs(oppositeCorner[0][lineDim] - corner[0][lineDim]) < LENGTH_THRESHOLDS[cornerType]:
+                continue
 
             lineIndex = len(lines)
             pointOrientationLinesMap[pointIndex][orientation].append(lineIndex)
@@ -255,7 +275,13 @@ def augmentPoints(points, decreasingTypes = [2], increasingTypes = [1]):
       if orientation in orientations:
         continue
 
-      oppositeOrientation = (orientation + 2) % 4
+      if orientation < 4:
+          oppositeOrientation = (orientation + 2) % 4
+      elif orientation < 6:
+          oppositeOrientation = orientation + 2
+      else:
+          oppositeOrientation = orientation - 2
+
       ranges = copy.deepcopy(ORIENTATION_RANGES[orientation])
       lineDim = -1
       if orientation == 0 or orientation == 2:
@@ -359,7 +385,11 @@ def filterWalls(wallPoints, wallLines):
         invalidPointMask[pointIndex] = True
         continue
       orientationNeighborMap = pointOrientationNeighborsMap[pointIndex]
-      orientations = POINT_ORIENTATIONS[point[2]][point[3]]
+      try:
+        orientations = POINT_ORIENTATIONS[point[2]][point[3]]
+      except:
+        #print('-'*20, point[2], point[3])
+        raise
       if len(orientationNeighborMap) < len(orientations):
         if len(orientationNeighborMap) >= 2 and tuple(orientationNeighborMap.keys()) in orientationMap:
           newOrientation = orientationMap[tuple(orientationNeighborMap.keys())]

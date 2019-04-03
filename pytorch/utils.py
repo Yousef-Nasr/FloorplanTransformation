@@ -1,14 +1,29 @@
 import numpy as np
 import cv2
 
-NUM_WALL_CORNERS = 13
-NUM_CORNERS = 21
+NUM_WALL_CORNERS = 58#13
+NUM_CORNERS = 66#21
 #CORNER_RANGES = {'wall': (0, 13), 'opening': (13, 17), 'icon': (17, 21)}
 
 NUM_ICONS = 7
 NUM_ROOMS = 10
-NUM_SLANTS = 4
-POINT_ORIENTATIONS = [[(2, ), (3, ), (0, ), (1, )], [(0, 3), (0, 1), (1, 2), (2, 3)], [(1, 2, 3), (0, 2, 3), (0, 1, 3), (0, 1, 2)], [(0, 1, 2, 3)]]
+POINT_ORIENTATIONS = [[(2, ), (3, ), (0, ), (1, )],
+
+                      [(0, 3), (0, 1), (1, 2), (2, 3),
+                       (2, 4), (3, 5), (0, 6), (1, 7), 
+                       (2, 5), (3, 6), (0, 7), (1, 4), 
+                       (5, 6), (6, 7), (4, 7), (4, 5), 
+                       (0, 5), (2, 6), (2, 7), (0, 4),
+                       (3, 4), (3, 7), (1, 5), (1, 6)],
+
+                      [(1, 2, 3), (0, 2, 3), (0, 1, 3), (0, 1, 2),
+                       (0, 2, 4), (0, 2, 7), (0, 2, 5), (0, 2, 6), 
+                       (2, 4, 6), (2, 5, 7), (0, 5, 7), (0, 4, 6), 
+                       (1, 3, 4), (1, 3, 5), (1, 3, 7), (1, 3, 6), 
+                       (1, 4, 6), (1, 5, 7), (3, 5, 7), (3, 4, 6), 
+                       (4, 5, 7), (5, 6, 7), (4, 6, 7), (4, 5, 6)],
+
+                      [(0, 1, 2, 3), (1, 3, 4, 6), (1, 3, 5, 7), (0, 2, 4, 6), (0, 2, 5, 7), (4, 5, 6, 7)]] 
 
 class ColorPalette:
     def __init__(self, numColors):
@@ -72,7 +87,9 @@ def calcLineDim(points, line):
     return lineDim
 
 def calcLineDirection(line, gap=3):
-    return int(abs(line[0][0] - line[1][0]) < abs(line[0][1] - line[1][1]))
+    if isManhattan(line):
+    	return int(abs(line[0][0] - line[1][0]) < abs(line[0][1] - line[1][1]))
+    return ((line[0][0] - line[1][0]) * (line[0][1] - line[1][1]) < 0) + 2
 
 ## Draw segmentation image. The input could be either HxW or HxWxC
 def drawSegmentationImage(segmentations, numColors=42, blackIndex=-1, blackThreshold=-1):
@@ -145,7 +162,7 @@ def extractCornersFromHeatmaps(heatmaps, heatmapThreshold=0.5, numPixelsThreshol
         continue
     return orientationPoints
 
-def extractCornersFromSegmentation(segmentation, cornerTypeRange=[0, 13]):
+def extractCornersFromSegmentation(segmentation, cornerTypeRange=[0, NUM_WALL_CORNERS]):
     """Extract corners from segmentation"""
     from skimage import measure
     orientationPoints = []
@@ -216,15 +233,15 @@ def drawPoints(filename, width, height, points, backgroundImage=None, pointSize=
 
 def drawPointsSeparately(path, width, height, points, backgroundImage=None, pointSize=5):
   if np.all(np.equal(backgroundImage, None)):
-    image = np.zeros((height, width, 13), np.uint8)
+    image = np.zeros((height, width, NUM_WALL_CORNERS), np.uint8)
   else:
-    image = np.tile(np.expand_dims(backgroundImage, -1), [1, 1, 13])
+    image = np.tile(np.expand_dims(backgroundImage, -1), [1, 1, NUM_WALL_CORNERS])
     pass
 
   for point in points:
     image[max(int(round(point[1])) - pointSize, 0):min(int(round(point[1])) + pointSize, height), max(int(round(point[0])) - pointSize, 0):min(int(round(point[0])) + pointSize, width), int(point[2] * 4 + point[3])] = 255
     continue
-  for channel in range(13):
+  for channel in range(NUM_WALL_CORNERS):
     cv2.imwrite(path + '_' + str(channel) + '.png', image[:, :, channel])
     continue
   return
