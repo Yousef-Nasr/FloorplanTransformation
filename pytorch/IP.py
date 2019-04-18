@@ -1751,29 +1751,36 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
       point_2 = np.array(wallPoints[line[1]][:2])
       lineDim = calcLineDim(wallPoints, line)
       #if lineDim > 1: print('-*'*10, 1587); exit(1)
+
       if lineDim > 1:
-        print(point_1, point_2, lineDim)
+        #print(point_1, point_2, lineDim)
         # four vectors perpendicular with two end points of line
         v01, v10 = [point_2[0] - point_1[0], point_2[1] - point_1[1]], [point_1[0] - point_2[0], point_1[1] - point_2[1]]
         v010, v011 = [v01[1], -v01[0]], [-v01[1], v01[0]]
         v102, v103 = [v10[1], -v10[0]], [-v10[1], v10[0]]
+
         # four points wall rectangle
         p0, p1, p2, p3 = move_p_invec(point_1, v010, wallLineWidth), move_p_invec(point_1, v011, wallLineWidth), move_p_invec(point_2, v102, wallLineWidth), move_p_invec(point_2, v103, wallLineWidth)
         ps = [np.minimum(np.maximum(p, 0), sizes - 1).astype(np.int32) for p in [p0, p1, p2, p3]]
-        print(ps); exit(1)
-        if lineDim == 2:
-          continue
-        if lineDim == 3:
-          continue
-      fixedValue = int(round((point_1[1 - lineDim] + point_2[1 - lineDim]) // 2))
-      point_1[lineDim], point_2[lineDim] = min(point_1[lineDim], point_2[lineDim]), max(point_1[lineDim], point_2[lineDim])
+        ps = np.asarray(ps)
 
-      point_1[1 - lineDim] = fixedValue - wallLineWidth
-      point_2[1 - lineDim] = fixedValue + wallLineWidth
-      point_1 = np.maximum(point_1, 0).astype(np.int32)
-      point_2 = np.minimum(point_2, sizes - 1).astype(np.int32)
+        # update wall confidence
+        from skimage.draw import polygon
+        img = np.zeros((256, 256))
+        img[polygon(ps[:, 1], ps[:, 0])] = 1
+        wallLineConfidence = np.sum(wallLineConfidenceMap[img == 1]) / np.sum(img) - 0.5
+        #print(wallLineConfidence, lineDim); exit(1)
+      else:
+        fixedValue = int(round((point_1[1 - lineDim] + point_2[1 - lineDim]) // 2))
+        point_1[lineDim], point_2[lineDim] = min(point_1[lineDim], point_2[lineDim]), max(point_1[lineDim], point_2[lineDim])
 
-      wallLineConfidence = np.sum(wallLineConfidenceMap[point_1[1]:point_2[1] + 1, point_1[0]:point_2[0] + 1]) / ((point_2[1] + 1 - point_1[1]) * (point_2[0] + 1 - point_1[0])) - 0.5
+        point_1[1 - lineDim] = fixedValue - wallLineWidth
+        point_2[1 - lineDim] = fixedValue + wallLineWidth
+        point_1 = np.maximum(point_1, 0).astype(np.int32)
+        point_2 = np.minimum(point_2, sizes - 1).astype(np.int32)
+
+        wallLineConfidence = np.sum(wallLineConfidenceMap[point_1[1]:point_2[1] + 1, point_1[0]:point_2[0] + 1]) / ((point_2[1] + 1 - point_1[1]) * (point_2[0] + 1 - point_1[0])) - 0.5
+        #print(wallLineConfidence, lineDim)
 
       obj += (-wallLineConfidence * w_l[lineIndex] * wallWeight)
 
