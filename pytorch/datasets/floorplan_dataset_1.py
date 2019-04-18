@@ -10,9 +10,38 @@ from skimage import measure
 import cv2
 import copy
 
+
+def lineRange2(line):
+    direction = calcLineDirection(line)
+    if direction < 2:
+        fixedValue = (line[0][1 - direction] + line[1][1 - direction]) // 2
+        minValue = min(line[0][direction], line[1][direction])
+        maxValue = max(line[0][direction], line[1][direction])
+        return direction, True, fixedValue, minValue, maxValue
+    else:
+        return direction, False, None, None, None
+
+def lineRange(line):
+    direction = calcLineDirection(line)
+    fixedValue = (line[0][1 - direction] + line[1][1 - direction]) // 2
+    minValue = min(line[0][direction], line[1][direction])
+    maxValue = max(line[0][direction], line[1][direction])
+    return direction, fixedValue, minValue, maxValue
+
+def pointDistance(point_1, point_2):
+    return max(abs(point_1[0] - point_2[0]), abs(point_1[1] - point_2[1]))
+
+# Euclidean distance between two points
+def p2p(p1, p2):
+    return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
+
 # distance between point and line
 def p2l(p, l):
     return min(pointDistance(p, l[i]) for i in range(2))
+
+# distance between line and line
+def l2l(l1, l2):
+    return min(pointDistance(l1[i], l2[j]) for i in range(2) for j in range(2))
 
 # intersection point between two lines
 def line(p1, p2):
@@ -32,9 +61,9 @@ def intersection(L1, L2):
     else:
         return False
 
-def pointDistance(point_1, point_2):
-    #return np.sqrt(pow(point_1[0] - point_2[0], 2) + pow(point_1[1] - point_2[1], 2))
-    return max(abs(point_1[0] - point_2[0]), abs(point_1[1] - point_2[1]))
+# check if point in a line
+def pInLine(p, l, gap):
+    return abs(p2p(p, l[0]) + p2p(p, l[1]) - p2p(*l)) < gap*2
 
 def divideWalls(walls):
     horizontalWalls = []
@@ -49,33 +78,70 @@ def divideWalls(walls):
     return horizontalWalls, verticalWalls
 
 def mergeLines(line_1, line_2):
-    d = calcLineDirection(line_1)
-    min_x, max_x = min(p[0] for l in [line_1, line_2] for p in l), max(p[0] for l in [line_1, line_2] for p in l)
-    min_y, max_y = min(p[1] for l in [line_1, line_2] for p in l), max(p[1] for l in [line_1, line_2] for p in l)
-
-    if d == 0:
-        #print(d, (min_x, (min_y + max_y) // 2), (max_x, (min_y + max_y) // 2))
-        return [(min_x, (min_y + max_y) // 2), (max_x, (min_y + max_y) // 2)]
-    elif d == 1:
-        #print(d, ((min_x + max_x) // 2, min_y), ((min_x + max_x) // 2, max_y))
-        return [((min_x + max_x) // 2, min_y), ((min_x + max_x) // 2, max_y)]
-    elif d == 2:
-        #print(d, (min_x, min_y), (max_x, max_y))
-        return [(min_x, min_y), (max_x, max_y)]
+    direction_1, isMan_1, fixedValue_1, min_1, max_1 = lineRange(line_1)
+    direction_2, _, fixedValue_2, min_2, max_2 = lineRange(line_2)
+    if isMan_1:
+        fixedValue = (fixedValue_1 + fixedValue_2) // 2
+        if direction_1 == 0:
+            return [(min(min_1, min_2), fixedValue), (max(max_1, max_2), fixedValue)]
+        else:
+            return [(fixedValue, min(min_1, min_2)), (fixedValue, max(max_1, max_2))]
     else:
-        #print(d, (min_x, max_y), (max_x, min_y))
-        return [(min_x, max_y), (max_x, min_y)]
+        if direction_1 == 3:
+            return [(min(line_1[0][0], line_2[1][0]), min(line_1[0][1], line_2[1][1])), 
+                    (min(line_1[0][0], line_2[1][0]), min(line_1[0][1], line_2[1][1]))]
+        else:
+            return [(max(line_1[0][0], line_2[1][0]), min(line_1[0][1], line_2[1][1])), 
+                    (min(line_1[0][0], line_2[1][0]), max(line_1[0][1], line_2[1][1]))]
 
-def findConnections(line_1, line_2, gap, fpath):
-    
-    if True:
-        def sele_ps_offline(c, l):
-            return l[0] if pointDistance(c, l[0]) > pointDistance(c, l[1]) else l[1]
+def findConnections(line_1, line_2, gap):
 
-        def sele_ps_inline(c, l):
-            return [p for p in l if pointDistance(c, p) > gap * 2]
+    isMan_1, isMan_2 = isManhattan(line_1), isManhattan(line_2)
 
-        def p2d(c, ps, f=1):
+    if True or isMan_1 and isMan_2:
+
+        connection_1 = -1
+        connection_2 = -1
+        pointConnected = False
+        for c_1 in range(2):
+            if pointConnected:
+                break
+            for c_2 in range(2):
+                if pointDistance(line_1[c_1], line_2[c_2]) > gap:
+                    continue
+
+                connection_1 = c_1
+                connection_2 = c_2
+                connectionPoint = ((line_1[c_1][0] + line_2[c_2][0]) // 2, (line_1[c_1][1] + line_2[c_2][1]) // 2)
+                pointConnected = True
+                break
+            continue
+        if pointConnected:
+            return [connection_1, connection_2], connectionPoint
+        #direction_1, isMan_1, fixedValue_1, min_1, max_1 = lineRange(line_1)
+        #direction_2, isMan_2, fixedValue_2, min_2, max_2 = lineRange(line_2)
+
+        direction_1, fixedValue_1, min_1, max_1 = lineRange(line_1)
+        direction_2, fixedValue_2, min_2, max_2 = lineRange(line_2)
+
+
+        if direction_1 == direction_2:
+            return [-1, -1], (0, 0)
+
+        if min(fixedValue_1, max_2) < max(fixedValue_1, min_2) - gap or min(fixedValue_2, max_1) < max(fixedValue_2, min_1) - gap:
+            return [-1, -1], (0, 0)
+        if abs(min_1 - fixedValue_2) <= gap:
+            return [0, 2], (fixedValue_2, fixedValue_1)
+        if abs(max_1 - fixedValue_2) <= gap:
+            return [1, 2], (fixedValue_2, fixedValue_1)
+        if abs(min_2 - fixedValue_1) <= gap:
+            return [2, 0], (fixedValue_2, fixedValue_1)
+        if abs(max_2 - fixedValue_1) <= gap:
+            return [2, 1], (fixedValue_2, fixedValue_1)
+        return [2, 2], (fixedValue_2, fixedValue_1)
+    else:
+        pass
+        def p2d(c, ps):
             d = []
             for p in ps:
                 direction = calcLineDirection((p, c))
@@ -87,45 +153,36 @@ def findConnections(line_1, line_2, gap, fpath):
                     d.append(6 if p[0] > c[0] and p[1] > c[1] else 4)
                 else:
                     d.append(7 if p[0] > c[0] and p[1] < c[1] else 5)
-            return sorted(d)
+            return d
 
+        #print('-'*20, line_1, line_2)
         l1, l2 = line(*line_1), line(*line_2)
         p = intersection(l1, l2)
-        
         w1, w2 = pInLine(p, line_1, gap), pInLine(p, line_2, gap)
 
         if not w1 and not w2 and l2l(line_1, line_2) < gap:
-            ps = [sele_ps_offline(p, l) for l in [line_1, line_2]]
-            return p2d(p, ps), p
+            return p2d(p, [line_1[0], line_2[0]]), p
         elif w1 and not w2 and p2l(p, line_2) < gap:
-            ps = sele_ps_inline(p, line_1) + [sele_ps_offline(p, line_2)]
-            return p2d(p, ps), p
+            return p2d(p, [line_1[0], line_1[1], line_2[0]]), p
         elif not w1 and w2 and p2l(p, line_1) < gap:
-            ps = sele_ps_inline(p, line_2) + [sele_ps_offline(p, line_1)]
-            return p2d(p, ps, 0), p
+            return p2d(p, [line_1[0], line_2[1], line_2[0]]), p
         elif w1 and w2:
-            ps1 = sele_ps_inline(p, line_1)
-            ps2 = sele_ps_inline(p, line_2)
-            if ps1 and ps2:
-                return p2d(p, ps1 + ps2), p
+            ps = [l[i] for l in [line_1, line_2] for i in range(2) if pointDistance(p, l[i]) >= gap]
+            assert len(ps) > 1, 'Number of points is not enough !'
+            return p2d(p, ps), p
 
         return [-1, -1], (0, 0)
 
-def lines2Corners(fpath, lines, gap):
+def lines2Corners(lines, gap):
     success = True
-    corners = []
-    lineConnections = []
-    for _ in range(len(lines)):
-        lineConnections.append({})
-        continue
 
     connectionCornerMap = {}
 
     # Manhattan patterns (with comment)
-    connectionCornerMap[(0, 3)] = 4 # (0, 3)
+    connectionCornerMap[(1, 1)] = 4 # (0, 3)
     connectionCornerMap[(0, 1)] = 5 # (0, 1)
-    connectionCornerMap[(1, 2)] = 6 # (1, 2)
-    connectionCornerMap[(2, 3)] = 7 # (2, 3)
+    connectionCornerMap[(0, 0)] = 6 # (1, 2)
+    connectionCornerMap[(1, 0)] = 7 # (2, 3)
 
     # slant patterns
     connectionCornerMap[(2, 4)] = 8
@@ -153,10 +210,10 @@ def lines2Corners(fpath, lines, gap):
     connectionCornerMap[(1, 5)] = 26
     connectionCornerMap[(1, 6)] = 27
 
-    connectionCornerMap[(1, 2, 3)] = 28 # (1, 2, 3)
-    connectionCornerMap[(0, 2, 3)] = 29 # (0, 2, 3)
-    connectionCornerMap[(0, 1, 3)] = 30 # (0, 1, 3)
-    connectionCornerMap[(0, 1, 2)] = 31 # (0, 1, 2)
+    connectionCornerMap[(2, 0)] = 28 # (1, 2, 3)
+    connectionCornerMap[(1, 2)] = 29 # (0, 2, 3)
+    connectionCornerMap[(2, 1)] = 30 # (0, 1, 3)
+    connectionCornerMap[(0, 2)] = 31 # (0, 1, 2)
 
     connectionCornerMap[(0, 2, 4)] = 32
     connectionCornerMap[(0, 2, 7)] = 33
@@ -183,7 +240,7 @@ def lines2Corners(fpath, lines, gap):
     connectionCornerMap[(4, 6, 7)] = 50
     connectionCornerMap[(4, 5, 6)] = 51
 
-    connectionCornerMap[(0, 1, 2, 3)] = 52 # (0, 1, 2, 3)
+    connectionCornerMap[(2, 2)] = 52 # (0, 1, 2, 3)
     connectionCornerMap[(1, 3, 4, 6)] = 53
     connectionCornerMap[(1, 3, 5, 7)] = 54
     connectionCornerMap[(0, 2, 4, 6)] = 55
@@ -192,32 +249,21 @@ def lines2Corners(fpath, lines, gap):
 
 
     corners = []
-    visited = []
-    for lineIndex_1, line_1 in enumerate(lines):
-        for lineIndex_2, line_2 in enumerate(lines):
-            if lineIndex_2 == lineIndex_1 or calcLineDirection(line_1) == calcLineDirection(line_2) or (lineIndex_2, lineIndex_1) in visited:
+    for lineIndex_1 in range(len(lines)-1):
+        for lineIndex_2 in range(lineIndex_1+1, len(lines)):
+            line_1, line_2 = lines[lineIndex_1], lines[lineIndex_2]
+
+            if calcLineDirection(line_1) == calcLineDirection(line_2):
                 continue
-            visited += [(lineIndex_1, lineIndex_2)]
-            connections, connectionPoint = findConnections(line_1, line_2, gap, fpath)
+            
+            connections, connectionPoint = findConnections(line_1, line_2, gap=gap)
             if connections[0] == -1 and connections[1] == -1:
                 continue
-
-            indices = [lineIndex_1, lineIndex_2]
-            for c in range(2):
-                if connections[c] in [0, 1] and connections[c] in lineConnections[indices[c]] and isManhattan(line_1) and isManhattan(line_2):
-                    success = False
-                    continue
-
-                lineConnections[indices[c]][connections[c]] = True
-                continue
-            try:
-                corners.append((connectionPoint, connectionCornerMap[tuple(connections)]))
-            except:
-                print(connections, line_1, line_2, fpath)
-                raise
+            if not isManhattan(line_1) or not isManhattan(line_2):
+                connections = sorted(connections)
+            corners.append((connectionPoint, connectionCornerMap[tuple(connections)]))
             continue
-        continue
-    #print(corners)
+    print(corners)
     return corners, success
 
 def getRoomLabelMap():
@@ -354,6 +400,7 @@ class FloorplanDataset(Dataset):
             index = debug
             print(index, self.imagePaths[index][1])
             pass
+        
         image = cv2.imread(self.dataFolder + self.imagePaths[index][0])
         image_ori = image
         image_width, image_height = image.shape[1], image.shape[0]
@@ -368,7 +415,6 @@ class FloorplanDataset(Dataset):
         wall_types = []
         doors = []
         semantics = {}
-        fpath = self.imagePaths[index][1]
         with open(self.dataFolder + self.imagePaths[index][1]) as info_file:
             line_index = 0
             for line in info_file:
@@ -387,8 +433,7 @@ class FloorplanDataset(Dataset):
                     pass
                 continue
             pass
-        #print([calcLineDirection(d) for d in doors])
-        #print(doors)
+
         gap = 3
         #print(semantics)
         invalid_indices = {}
@@ -417,7 +462,8 @@ class FloorplanDataset(Dataset):
             pass
         
         #walls = connectWalls(walls, roomSegmentation, gap=gap)
-        corners, success = lines2Corners(fpath, walls, gap=gap)
+        
+        corners, success = lines2Corners(walls, gap=gap)
         if not success:
             #print('warning', index, self.imagePaths[index][1])
             pass
@@ -438,7 +484,7 @@ class FloorplanDataset(Dataset):
 
         width = self.options.width
         height = self.options.height
-        #print('='*20, width, height)
+        
         roomSegmentation = np.zeros((height, width), dtype=np.uint8)
         for line in walls:
             #cv2.line(roomSegmentation, line[0], line[1], color=NUM_ROOMS + 1 + calcLineDirection(line), thickness=gap)
@@ -452,12 +498,11 @@ class FloorplanDataset(Dataset):
             corner_gt.append((corner[0][0], corner[0][1], corner[1] + 1))
             continue
 
-        #openingCornerMap = [[3, 1], [0, 2]]
-        openingCornerMap = [[2, 0], [1, 3], [6, 4], [5, 7]]
+        openingCornerMap = [[3, 1], [0, 2]]
         for opening in doors:
             direction = calcLineDirection(opening)
             for cornerIndex, corner in enumerate(opening):
-                corner_gt.append((int(round(corner[0])), int(round(corner[1])), 1 + NUM_WALL_CORNERS + openingCornerMap[direction][cornerIndex])) # 14
+                corner_gt.append((int(round(corner[0])), int(round(corner[1])), 14 + openingCornerMap[direction][cornerIndex]))
                 continue
             continue
 
@@ -480,10 +525,10 @@ class FloorplanDataset(Dataset):
                     if label == 0:
                         continue
                     cv2.rectangle(iconSegmentation, (int(round(corners[0][0])), int(round(corners[0][1]))), (int(round(corners[1][0])), int(round(corners[1][1]))), color=label, thickness=-1)
-                    corner_gt.append((corners[0][0], corners[0][1], 9 + NUM_WALL_CORNERS + 2)) # 18
-                    corner_gt.append((corners[0][0], corners[1][1], 9 + NUM_WALL_CORNERS + 1))
-                    corner_gt.append((corners[1][0], corners[0][1], 9 + NUM_WALL_CORNERS + 3))
-                    corner_gt.append((corners[1][0], corners[1][1], 9 + NUM_WALL_CORNERS + 0))
+                    corner_gt.append((corners[0][0], corners[0][1], 18 + 2))
+                    corner_gt.append((corners[0][0], corners[1][1], 18 + 1))
+                    corner_gt.append((corners[1][0], corners[0][1], 18 + 3))
+                    corner_gt.append((corners[1][0], corners[1][1], 18 + 0))
                 else:
                     roomIndex = rooms[(corners[0][1] + corners[1][1]) // 2][(corners[0][0] + corners[1][0]) // 2]
                     if roomIndex == wallIndex or roomIndex == backgroundIndex:
@@ -518,7 +563,7 @@ class FloorplanDataset(Dataset):
                 pass
             continue
 
-        cornerSegmentation = np.zeros((height, width, NUM_CORNERS), dtype=np.uint8)
+        cornerSegmentation = np.zeros((height, width, 66), dtype=np.uint8)
         for corner in corner_gt:
             cornerSegmentation[min(max(corner[1], 0), height - 1), min(max(corner[0], 0), width - 1), corner[2] - 1] = 1
             continue

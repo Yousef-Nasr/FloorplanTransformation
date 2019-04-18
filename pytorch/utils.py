@@ -1,13 +1,16 @@
 import numpy as np
 import cv2
 
+# added 45 wall corner patterns and 4 opening corner patterns
 NUM_WALL_CORNERS = 58#13
-NUM_CORNERS = 66#21
+NUM_CORNERS = 70#21
+#new CORNER_RANGES = {'wall': (0, 57), 'opening': (58, 65), 'icon': (66, 69)}
 #CORNER_RANGES = {'wall': (0, 13), 'opening': (13, 17), 'icon': (17, 21)}
 
 NUM_ICONS = 7
 NUM_ROOMS = 10
 POINT_ORIENTATIONS = [[(2, ), (3, ), (0, ), (1, )],
+                      #[(0,), (1,), (2,), (3,), (4,), (5,), (6,), (7,)],
 
                       [(0, 3), (0, 1), (1, 2), (2, 3),
                        (2, 4), (3, 5), (0, 6), (1, 7), 
@@ -76,6 +79,65 @@ class ColorPalette:
 def isManhattan(line, gap=3):
     return min(abs(line[0][0] - line[1][0]), abs(line[0][1] - line[1][1])) < gap
 
+# Euclidean distance between two points
+def p2p(p1, p2):
+    #print('-'*20, p1, p2)
+    return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
+
+# distance between line and line
+def l2l(l1, l2):
+    return min(pointDistance(l1[i], l2[j]) for i in range(2) for j in range(2))
+
+# move point inline towards the second point of line for gap distance
+def move_p_inline(p, line, gap=3):
+    p0, p1 = line[0], line[1]
+    vec = [p1[0] - p0[0], p1[1] - p0[1]]
+    return move_p_invec(p, vec, gap)
+    #l = p2p(p0, p1)
+    #direction = [(p1[0] - p0[0]) / l, (p1[1] - p0[1]) / l]
+    #return [p[0] + gap * direction[0], p[1] + gap * direction[1]]
+
+# move point in direction of vector for gap distance
+def move_p_invec(p, v, gap=3):
+  l = p2p(v, [0, 0])
+  return [p[0] + gap * v[0] / l, p[1] + gap * v[1] / l]
+
+# check if point is in a line
+def pInLine(p, l, gap=3):
+    return abs(p2p(p, l[0]) + p2p(p, l[1]) - p2p(*l)) < gap*2
+
+# projection of a point onto a line
+def project_p_toline(p, line):
+
+  x = np.array(p, dtype=float)
+
+  u = np.array(line[0], dtype=float)
+  v = np.array(line[1], dtype=float)
+
+  n = v - u
+  n /= np.linalg.norm(n, 2)
+
+  return u + n*np.dot(x - u, n)
+
+def calcLineDim2(points, line):
+    point_1 = points[line[0]]
+    point_2 = points[line[1]]
+    if abs(point_2[0] - point_1[0]) > abs(point_2[1] - point_1[1]):
+        #print('-'*20, point_1, point_2); exit(1)
+        lineDim = 0
+    else:
+        #print('-'*20, point_1, point_2); exit(1)
+        lineDim = 1
+        pass
+    return lineDim
+
+'''
+line dimension: (first point orientation, second point orientation)
+0: (0, 2)
+1: (3, 1)
+2: (6, 4)
+3: (5, 7)
+'''
 def calcLineDim(points, line):
     point_1 = points[line[0]]
     point_2 = points[line[1]]
@@ -83,13 +145,26 @@ def calcLineDim(points, line):
         lineDim = 0
     else:
         lineDim = 1
-        pass
+
+    oris_1 = np.asarray(POINT_ORIENTATIONS[point_1[2]][point_1[3]])
+    oris_2 = np.asarray(POINT_ORIENTATIONS[point_2[2]][point_2[3]])
+
+    if any(oris_1 > 3) and any(oris_2 > 3):
+        if 4 in oris_1 and 6 in oris_2 or 6 in oris_1 and 4 in oris_2: lineDim = 2
+        elif 5 in oris_1 and 7 in oris_2 or 7 in oris_1 and 5 in oris_2: lineDim = 3
+        #else: print('-'*20, lineDim, point_1, point_2); exit(1)
+
+    #if lineDim == 3: print('-'*20, point_1, point_2)
+
     return lineDim
 
 def calcLineDirection(line, gap=3):
     if isManhattan(line):
     	return int(abs(line[0][0] - line[1][0]) < abs(line[0][1] - line[1][1]))
     return ((line[0][0] - line[1][0]) * (line[0][1] - line[1][1]) < 0) + 2
+
+def calcLineDirection2(line, gap=3):
+    return int(abs(line[0][0] - line[1][0]) < abs(line[0][1] - line[1][1]))
 
 ## Draw segmentation image. The input could be either HxW or HxWxC
 def drawSegmentationImage(segmentations, numColors=42, blackIndex=-1, blackThreshold=-1):
@@ -180,7 +255,8 @@ def extractCornersFromSegmentation(segmentation, cornerTypeRange=[0, NUM_WALL_CO
     return orientationPoints
 
 def getOrientationRanges(width, height):
-    orientationRanges = [[width, 0, 0, 0], [width, height, width, 0], [width, height, 0, height], [0, height, 0, 0]]
+    #orientationRanges = [[width, 0, 0, 0], [width, height, width, 0], [width, height, 0, height], [0, height, 0, 0]]
+    orientationRanges = [[0, height, 0, 0], [width, height, 0, height], [width, height, width, 0], [width, 0, 0, 0]]
     return orientationRanges
 
 def getIconNames():

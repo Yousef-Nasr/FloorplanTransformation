@@ -22,7 +22,7 @@ def main(options):
         os.system("mkdir -p %s"%options.test_dir)
         pass
 
-    dataset = FloorplanDataset(options, split='train', random=True)
+    dataset = FloorplanDataset(options, split='train_1', random=True)
 
     print('the number of images', len(dataset))    
 
@@ -32,20 +32,23 @@ def main(options):
     model.cuda()
     model.train()
 
+    base = 160
+
     if options.restore == 1:
-        print('restore')
-        model.load_state_dict(torch.load(options.checkpoint_dir + '/checkpoint_200.pth'))
+        print('restore from ' + options.checkpoint_dir + '/checkpoint_%d.pth' % (base))
+        model.load_state_dict(torch.load(options.checkpoint_dir + '/checkpoint_%d.pth' % (base)))
         pass
 
     
     if options.task == 'test':
+        print('-'*20, 'test')
         dataset_test = FloorplanDataset(options, split='test_1', random=False)
         testOneEpoch(options, model, dataset_test)
         exit(1)
     
     optimizer = torch.optim.Adam(model.parameters(), lr = options.LR)
-    if options.restore == 1 and os.path.exists(options.checkpoint_dir + '/optim.pth'):
-        optimizer.load_state_dict(torch.load(options.checkpoint_dir + '/optim.pth'))
+    if options.restore == 1 and os.path.exists(options.checkpoint_dir + '/optim_%d.pth' % (base)):
+        optimizer.load_state_dict(torch.load(options.checkpoint_dir + '/optim_%d.pth' % (base)))
         pass
 
     for epoch in range(options.numEpochs):
@@ -85,8 +88,8 @@ def main(options):
             continue
         print('loss', np.array(epoch_losses).mean(0))
         if (epoch + 1) % 20 == 0:
-            torch.save(model.state_dict(), options.checkpoint_dir + '/checkpoint_%d.pth' % (epoch + 1))
-            torch.save(optimizer.state_dict(), options.checkpoint_dir + '/optim_%d.pth' % (epoch + 1))
+            torch.save(model.state_dict(), options.checkpoint_dir + '/checkpoint_%d.pth' % (base + epoch + 1))
+            torch.save(optimizer.state_dict(), options.checkpoint_dir + '/optim_%d.pth' % (base + epoch + 1))
             pass
 
         #testOneEpoch(options, model, dataset_test)        
@@ -125,8 +128,10 @@ def testOneEpoch(options, model, dataset):
             for batchIndex in range(len(images)):
                 corner_heatmaps = corner_pred[batchIndex].detach().cpu().numpy()
                 icon_heatmaps = torch.nn.functional.softmax(icon_pred[batchIndex], dim=-1).detach().cpu().numpy()
-                room_heatmaps = torch.nn.functional.softmax(room_pred[batchIndex], dim=-1).detach().cpu().numpy()                
-                reconstructFloorplan(corner_heatmaps[:, :, :NUM_WALL_CORNERS], corner_heatmaps[:, :, NUM_WALL_CORNERS:NUM_WALL_CORNERS + 4], corner_heatmaps[:, :, -4:], icon_heatmaps, room_heatmaps, output_prefix=options.test_dir + '/' + str(batchIndex) + '_', densityImage=None, gt_dict=None, gt=False, gap=-1, distanceThreshold=-1, lengthThreshold=-1, debug_prefix='test', heatmapValueThresholdWall=None, heatmapValueThresholdDoor=None, heatmapValueThresholdIcon=None, enableAugmentation=True)
+                room_heatmaps = torch.nn.functional.softmax(room_pred[batchIndex], dim=-1).detach().cpu().numpy()
+
+                print('-'*20, corner_heatmaps.shape)
+                reconstructFloorplan(corner_heatmaps[:, :, :NUM_WALL_CORNERS], corner_heatmaps[:, :, NUM_WALL_CORNERS:NUM_WALL_CORNERS + 8], corner_heatmaps[:, :, -4:], icon_heatmaps, room_heatmaps, output_prefix=options.test_dir + '/' + str(batchIndex) + '_', densityImage=None, gt_dict=None, gt=False, gap=-1, distanceThreshold=-1, lengthThreshold=-1, debug_prefix='test', heatmapValueThresholdWall=None, heatmapValueThresholdDoor=None, heatmapValueThresholdIcon=None, enableAugmentation=True)
                 continue
             if options.visualizeMode == 'debug':
                 exit(1)
