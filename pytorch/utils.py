@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+from skimage.draw import polygon
 
 # added 45 wall corner patterns and 4 opening corner patterns
 NUM_WALL_CORNERS = 58#13
@@ -79,12 +80,28 @@ class ColorPalette:
 def isManhattan(line, gap=3):
     return min(abs(line[0][0] - line[1][0]), abs(line[0][1] - line[1][1])) < gap
 
+# get four rectange points of a slant line
+def rec_points_sline(point_1, point_2, lineWidth, height, width):
+    v01, v10 = [point_2[0] - point_1[0], point_2[1] - point_1[1]], [point_1[0] - point_2[0], point_1[1] - point_2[1]]
+    v010, v011 = [v01[1], -v01[0]], [-v01[1], v01[0]]
+    v102, v103 = [v10[1], -v10[0]], [-v10[1], v10[0]]
+
+    # four points wall rectangle
+    p0, p1, p2, p3 = move_p_invec(point_1, v010, lineWidth), move_p_invec(point_1, v011, lineWidth), move_p_invec(point_2, v102, lineWidth), move_p_invec(point_2, v103, lineWidth)
+    ps = [np.minimum(np.maximum(p, 0), (height - 1, width - 1)).astype(np.int32) for p in [p0, p1, p2, p3]]
+    return np.asarray(ps)
+
+# get the polygon of a slant line
+def poly_sline(point_1, point_2, lineWidth, height, width):
+  ps = rec_points_sline(point_1, point_2, lineWidth, height, width)
+  return polygon(ps[:, 1], ps[:, 0])
+
 # Euclidean distance between two points
 def p2p(p1, p2):
     #print('-'*20, p1, p2)
     return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
 
-# distance between line and line
+# Manhattan distance between line and line
 def l2l(l1, l2):
     return min(pointDistance(l1[i], l2[j]) for i in range(2) for j in range(2))
 
@@ -105,6 +122,11 @@ def move_p_invec(p, v, gap=3):
 # check if point is in a line
 def pInLine(p, l, gap=3):
     return abs(p2p(p, l[0]) + p2p(p, l[1]) - p2p(*l)) < gap*2
+
+# Euclidean distance of a point to a line
+def p2line(p, line):
+  projected = project_p_toline(p, line)
+  return p2p(p, projected)
 
 # projection of a point onto a line
 def project_p_toline(p, line):
@@ -329,15 +351,18 @@ def drawLineMask(width, height, points, lines, lineWidth = 5, backgroundImage = 
     point_1 = points[line[0]]
     point_2 = points[line[1]]
     direction = calcLineDirectionPoints(points, line)
-
-    fixedValue = int(round((point_1[1 - direction] + point_2[1 - direction]) / 2))
-    minValue = int(min(point_1[direction], point_2[direction]))
-    maxValue = int(max(point_1[direction], point_2[direction]))
-    if direction == 0:
-      lineMask[max(fixedValue - lineWidth, 0):min(fixedValue + lineWidth + 1, height), minValue:maxValue + 1] = 1
+    if direction > 1:
+      rs, cs = poly_sline(point_1, point_2, lineWidth, height, width)
+      lineMask[rs, cs] = 1
     else:
-      lineMask[minValue:maxValue + 1, max(fixedValue - lineWidth, 0):min(fixedValue + lineWidth + 1, width)] = 1
-      pass
+      fixedValue = int(round((point_1[1 - direction] + point_2[1 - direction]) / 2))
+      minValue = int(min(point_1[direction], point_2[direction]))
+      maxValue = int(max(point_1[direction], point_2[direction]))
+      if direction == 0:
+        lineMask[max(fixedValue - lineWidth, 0):min(fixedValue + lineWidth + 1, height), minValue:maxValue + 1] = 1
+      else:
+        lineMask[minValue:maxValue + 1, max(fixedValue - lineWidth, 0):min(fixedValue + lineWidth + 1, width)] = 1
+        pass
     continue
   return lineMask
 
@@ -360,7 +385,6 @@ def drawLines(filename, width, height, points, lines, lineLabels = [], backgroun
     point_2 = points[line[1]]
     direction = calcLineDirectionPoints(points, line)
 
-
     fixedValue = int(round((point_1[1 - direction] + point_2[1 - direction]) / 2))
     minValue = int(round(min(point_1[direction], point_2[direction])))
     maxValue = int(round(max(point_1[direction], point_2[direction])))
@@ -368,14 +392,33 @@ def drawLines(filename, width, height, points, lines, lineLabels = [], backgroun
       if np.any(lineColor == None):
         lineColor = np.random.rand(3) * 255
         pass
-      if direction == 0:
+
+      if direction > 1:
+        rs, cs = poly_sline(point_1, point_2, lineWidth, height, width)
+        image[rs, cs, :] = lineColor
+      elif direction == 0:
         image[max(fixedValue - lineWidth, 0):min(fixedValue + lineWidth + 1, height), minValue:maxValue + 1, :] = lineColor
-      else:
+      elif direction == 1:
         image[minValue:maxValue + 1, max(fixedValue - lineWidth, 0):min(fixedValue + lineWidth + 1, width), :] = lineColor
     else:
       labels = lineLabels[lineIndex]
       isExterior = False
-      if direction == 0:
+
+      if direction > 1:
+        print(direction, 'with label'); exit(1)
+        ps = rec_points_sline(point_1, point_2, lineWidth, height, width)
+        ps1 = np.asarray(ps[0], point_1, point_2, ps[3])
+        ps2 = np.asarray(point_1, ps[1], ps[2], point_2)
+
+        img = np.zeros_like(image)
+        rs1, cs1 = polygon(ps1[:, 1], ps1[:, 0])
+        rs2, cs2 = polygon(ps2[:, 1], ps2[:, 0])
+
+        for c in range(3):
+          image[rs1, cs1, c] = colorMap[labels[0]][c]
+          image[rs2, cs2, c] = colorMap[labels[1]][c]
+
+      elif direction == 0:
         for c in range(3):
           image[max(fixedValue - lineWidth, 0):min(fixedValue, height), minValue:maxValue, c] = colorMap[labels[0]][c]
           image[max(fixedValue, 0):min(fixedValue + lineWidth + 1, height), minValue:maxValue, c] = colorMap[labels[1]][c]
