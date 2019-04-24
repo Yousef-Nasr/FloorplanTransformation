@@ -591,35 +591,43 @@ def adjustPoints(points, lines):
         continue
       continue
 
+    xy = np.concatenate([np.array([points[pointIndex][:2] for pointIndex in lines[lineIndex]]) for lineIndex in lineGroup], axis=0)
+    mins = list(xy.min(0))
+    maxs = list(xy.max(0))
+
     # for slant lines
     lineDim = calcLineDim(points, lines[lineGroup[0]])
-    if lineDim > 1:
-      mean_x = sum(points[p][0] for p in pointGroup) / len(pointGroup)
-      mean_y = sum(points[p][1] for p in pointGroup) / len(pointGroup)
-      points[point][0] = mean_x
-      points[point][1] = mean_y
-      continue
-
-    # for Manhattan lines
-    xy = np.concatenate([np.array([points[pointIndex][:2] for pointIndex in lines[lineIndex]]) for lineIndex in lineGroup], axis=0)
-    mins = xy.min(0)
-    maxs = xy.max(0)
-    if maxs[0] - mins[0] > maxs[1] - mins[1]:
-      lineDim = 0
+    if lineDim == 2:
+      #print([lines[l] for l in lineGroup]); print(lineDim, xy, mins, maxs)
+      for p in pointGroup:
+        #print(points[p][:2], points[p]); exit(1)
+        if points[p][:2] == mins or points[p][:2] == maxs: continue
+        points[p][:2] = project_p_toline([points[p][0], points[p][1]], [mins, maxs])
+    elif lineDim == 3:
+      #print([lines[l] for l in lineGroup]); print(lineDim, xy, mins, maxs)
+      for p in pointGroup:
+        #print(points[p][:2], points[p]); exit(1)
+        if points[p][0] == mins[0] or points[p][1] == mins[1] or points[p][0] == maxs[0] or points[p][1] == maxs[1]: continue
+        points[p][:2] = project_p_toline([points[p][0], points[p][1]], [[mins[0], maxs[1]], [maxs[0], mins[1]]])
     else:
-      lineDim = 1
-      pass
+      # for Manhattan lines
+      '''
+      if maxs[0] - mins[0] > maxs[1] - mins[1]:
+        lineDim = 0
+      else:
+        lineDim = 1
+        pass
+      '''
+      fixedValue = 0
+      for point in pointGroup:
+        fixedValue += points[point][1 - lineDim]
+        continue
+      fixedValue /= len(pointGroup)
 
-    fixedValue = 0
-    for point in pointGroup:
-      fixedValue += points[point][1 - lineDim]
+      for point in pointGroup:
+        points[point][1 - lineDim] = fixedValue
+        continue
       continue
-    fixedValue /= len(pointGroup)
-
-    for point in pointGroup:
-      points[point][1 - lineDim] = fixedValue
-      continue
-    continue
   return
 
 ## Merge two close points after optimization
@@ -648,12 +656,16 @@ def mergePoints(points, lines):
       if pointDistance(point_1[:2], point_2[:2]) <= DISTANCES['point']:
         orientations = list(POINT_ORIENTATIONS[point_1[2]][point_1[3]] + POINT_ORIENTATIONS[point_2[2]][point_2[3]])
         if len([line for line in lines if pointIndex_1 in line and pointIndex_2 in line]) > 0:
-          if abs(point_1[0] - point_2[0]) > abs(point_1[1] - point_2[1]):
-            orientations.remove(1)
-            orientations.remove(3)
+          #if abs(point_1[0] - point_2[0]) > abs(point_1[1] - point_2[1]):
+          lineDim = calcLineDim_(point_1, point_2)
+          if lineDim == 0:
+            orientations = [ori for ori in orientations if ori == 0 or ori == 2]
+          elif lineDim == 1:
+            orientations = [ori for ori in orientations if ori == 1 or ori == 3]
+          elif lineDim == 2:
+            orientations = [ori for ori in orientations if ori == 4 or ori == 6]
           else:
-            orientations.remove(0)
-            orientations.remove(2)
+            orientations = [ori for ori in orientations if ori == 5 or ori == 7]
             pass
           pass
         orientations = tuple(set(orientations))
@@ -912,7 +924,7 @@ def findLineNeighbors(points, lines, labelVotesMap, gap):
     hasChange = False
     for lineIndex, neighbors in enumerate(lineNeighbors):
       lineDim = calcLineDim(points, lines[lineIndex])
-      #if lineDim > 1: print('-*'*10, 815); exit(1)
+      #if lineDim > 1: continue#print('-*'*10, 915); exit(1)
       if lineDim == 3:
         for neighbor_1, region_1 in neighbors[3].items():
           for neighbor_2, _ in neighbors[2].items():
@@ -1404,9 +1416,9 @@ def findCandidatesFromHeatmaps(iconHeatmaps, iconPointOffset, doorPointOffset):
   return newIcons, newIconPoints, newDoorLines, newDoorPoints
 
 ## Sort lines so that the first point always has smaller x or y
-def sortLines(points, lines):
+def sortLines(points, lines, door=False):
   for lineIndex, line in enumerate(lines):
-    lineDim = calcLineDim(points, line)
+    lineDim = calcLineDim(points, line, door)
     #if lineDim > 1: print('-*'*10, 1233); exit(1)
     if lineDim < 2:
       if points[line[0]][lineDim] > points[line[1]][lineDim]:
@@ -1464,7 +1476,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     pass
 
 
-  sortLines(doorPoints, doorLines)
+  sortLines(doorPoints, doorLines, True)
   sortLines(wallPoints, wallLines)
 
   print('the number of points', len(wallPoints), len(doorPoints), len(iconPoints))
@@ -1614,7 +1626,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     l_dir_labels = []
     for lineIndex in range(len(wallLines)):
       dir_labels = []
-      for direction in range(4):
+      for direction in range(8):
         labels = []
         for label in range(NUM_ROOMS):
           labels.append(LpVariable(cat=LpBinary, name="line_" + str(lineIndex) + "_" + str(direction) + "_" + str(label)))
@@ -1650,10 +1662,9 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
         model += (iconSum == 1)
         continue
       pass
-
     ## Semantic label one hot constraints
     for lineIndex in range(len(wallLines)):
-      for direction in range(4):
+      for direction in range(8):
         labelSum = LpAffineExpression()
         for label in range(NUM_ROOMS):
           labelSum += l_dir_labels[lineIndex][direction][label]
@@ -1685,22 +1696,24 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     #closeRooms[3] = False
     closeRooms[8] = False
     closeRooms[9] = False
-    '''
     for label in range(NUM_ROOMS):
       if not closeRooms[label]:
         continue
       for pointIndex, orientationLinesMap in enumerate(wallPointOrientationLinesMap):
+        #print(orientationLinesMap); exit(1)
         for orientation, lines in orientationLinesMap.items():
-          direction = int(orientation in [1, 2])
+          #print('orientation: ', orientation)
+          direction = int(orientation in [1, 2, 6, 7])
           lineSum = LpAffineExpression()
           for lineIndex in lines:
             lineSum += l_dir_labels[lineIndex][direction][label]
             continue
-          for nextOrientation in range(orientation + 1, 8):
-            if not (nextOrientation % 4) in orientationLinesMap:
+          #for nextOrientation in range(orientation + 1, 8):
+          for nextOrientation in range(orientation+1, 8):
+            if not nextOrientation in orientationLinesMap:
               continue
-            nextLines = orientationLinesMap[nextOrientation % 4]
-            nextDirection = int((nextOrientation % 4) in [0, 3])
+            nextLines = orientationLinesMap[nextOrientation]
+            nextDirection = int(nextOrientation in [0, 3, 4, 5])
             nextLineSum = LpAffineExpression()
             for nextLineIndex in nextLines:
               nextLineSum += l_dir_labels[nextLineIndex][nextDirection][label]
@@ -1710,7 +1723,6 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
           continue
         continue
       continue
-    '''
 
     ## Exterior constraints
     exteriorLineSum = LpAffineExpression()
@@ -1967,8 +1979,8 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
 
         filteredWallTypes.append(0)
 
-        labels = [11, 11]
-        for direction in range(2):
+        labels = [11, 11, 11, 11]
+        for direction in range(4):
           for label in range(NUM_ROOMS):
             if l_dir_labels[lineIndex][direction][label].varValue > 0.5:
               labels[direction] = label

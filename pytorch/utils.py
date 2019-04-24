@@ -10,6 +10,7 @@ NUM_CORNERS = 70#21
 
 NUM_ICONS = 7
 NUM_ROOMS = 10
+DOOR_ORIS = [[(0,), (1,), (2,), (3,), (4,), (5,), (6,), (7,)]]
 POINT_ORIENTATIONS = [[(2, ), (3, ), (0, ), (1, )],
                       #[(0,), (1,), (2,), (3,), (4,), (5,), (6,), (7,)],
 
@@ -160,16 +161,22 @@ line dimension: (first point orientation, second point orientation)
 2: (6, 4)
 3: (5, 7)
 '''
-def calcLineDim(points, line):
+def calcLineDim(points, line, door=False):
     point_1 = points[line[0]]
     point_2 = points[line[1]]
+    return calcLineDim_(point_1, point_2)
+
+def calcLineDim_(point_1, point_2, door=False):
     if abs(point_2[0] - point_1[0]) > abs(point_2[1] - point_1[1]):
         lineDim = 0
     else:
         lineDim = 1
-
-    oris_1 = np.asarray(POINT_ORIENTATIONS[point_1[2]][point_1[3]])
-    oris_2 = np.asarray(POINT_ORIENTATIONS[point_2[2]][point_2[3]])
+    if door:
+      oris_1 = np.asarray(DOOR_ORIS[point_1[2]][point_1[3]])
+      oris_2 = np.asarray(DOOR_ORIS[point_2[2]][point_2[3]])
+    else:
+      oris_1 = np.asarray(POINT_ORIENTATIONS[point_1[2]][point_1[3]])
+      oris_2 = np.asarray(POINT_ORIENTATIONS[point_2[2]][point_2[3]])
 
     if any(oris_1 > 3) and any(oris_2 > 3):
         if 4 in oris_1 and 6 in oris_2 or 6 in oris_1 and 4 in oris_2: lineDim = 2
@@ -405,11 +412,11 @@ def drawLines(filename, width, height, points, lines, lineLabels = [], backgroun
       isExterior = False
 
       if direction > 1:
-        print(direction, 'with label'); exit(1)
+        #print(direction, 'with label'); exit(1)
         ps = rec_points_sline(point_1, point_2, lineWidth, height, width)
-        ps1 = np.asarray(ps[0], point_1, point_2, ps[3])
-        ps2 = np.asarray(point_1, ps[1], ps[2], point_2)
-
+        ps1 = np.asarray([ps[0], np.array(point_1[:2]), np.array(point_2[:2]), ps[3]], dtype=int)
+        ps2 = np.asarray([np.array(point_1[:2]), ps[1], ps[2], np.array(point_2[:2])], dtype=int)
+        #print(ps1, ps2); exit(1)
         img = np.zeros_like(image)
         rs1, cs1 = polygon(ps1[:, 1], ps1[:, 0])
         rs2, cs2 = polygon(ps2[:, 1], ps2[:, 0])
