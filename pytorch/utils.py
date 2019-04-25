@@ -172,11 +172,16 @@ def calcLineDim_(point_1, point_2, door=False):
     else:
         lineDim = 1
     if door:
+      print(door)
       oris_1 = np.asarray(DOOR_ORIS[point_1[2]][point_1[3]])
       oris_2 = np.asarray(DOOR_ORIS[point_2[2]][point_2[3]])
+      print(oris_1, oris_2)
     else:
-      oris_1 = np.asarray(POINT_ORIENTATIONS[point_1[2]][point_1[3]])
-      oris_2 = np.asarray(POINT_ORIENTATIONS[point_2[2]][point_2[3]])
+      try:
+        oris_1 = np.asarray(POINT_ORIENTATIONS[point_1[2]][point_1[3]])
+        oris_2 = np.asarray(POINT_ORIENTATIONS[point_2[2]][point_2[3]])
+      except:
+        print(point_1, point_2, door); exit(1)
 
     if any(oris_1 > 3) and any(oris_2 > 3):
         if 4 in oris_1 and 6 in oris_2 or 6 in oris_1 and 4 in oris_2: lineDim = 2

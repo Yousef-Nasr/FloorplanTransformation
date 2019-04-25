@@ -176,7 +176,6 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
 
   augmentedPointMask = {}
 
-
   lines = []
   pointNeighbors = [[] for point in points]
   for orientationIndex, corners in enumerate(orientationPoints):
@@ -224,6 +223,7 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
                 continue
               if abs(oppositeCorner[0][lineDim] - corner[0][lineDim]) < LENGTH_THRESHOLDS[cornerType]: continue
             else:
+              if True not in corner and True not in oppositeCorner: print('detected slant lines: ', corner, oppositeCorner, orientation, oppositeOrientation)
               if orientation == 4 and not (oppositeCorner[0][0] < corner[1][0]-gap and oppositeCorner[0][1] < corner[1][1]-gap): continue
               if orientation == 5 and not (oppositeCorner[0][0] < corner[1][0]-gap and oppositeCorner[0][1] > corner[2][1]+gap): continue
               if orientation == 6 and not (oppositeCorner[0][0] > corner[2][0]+gap and oppositeCorner[0][1] > corner[2][1]+gap): continue
@@ -598,12 +598,14 @@ def adjustPoints(points, lines):
     # for slant lines
     lineDim = calcLineDim(points, lines[lineGroup[0]])
     if lineDim == 2:
-      #print([lines[l] for l in lineGroup]); print(lineDim, xy, mins, maxs)
+      #print([lines[l] for l in lineGroup])
+      print('adjust slant line: ', lineDim, xy, mins, maxs)
       for p in pointGroup:
         #print(points[p][:2], points[p]); exit(1)
         if points[p][:2] == mins or points[p][:2] == maxs: continue
         points[p][:2] = project_p_toline([points[p][0], points[p][1]], [mins, maxs])
     elif lineDim == 3:
+      print('adjust slant line: ', lineDim, xy, mins, maxs)
       #print([lines[l] for l in lineGroup]); print(lineDim, xy, mins, maxs)
       for p in pointGroup:
         #print(points[p][:2], points[p]); exit(1)
@@ -656,7 +658,14 @@ def mergePoints(points, lines):
       if pointDistance(point_1[:2], point_2[:2]) <= DISTANCES['point']:
         orientations = list(POINT_ORIENTATIONS[point_1[2]][point_1[3]] + POINT_ORIENTATIONS[point_2[2]][point_2[3]])
         if len([line for line in lines if pointIndex_1 in line and pointIndex_2 in line]) > 0:
-          #if abs(point_1[0] - point_2[0]) > abs(point_1[1] - point_2[1]):
+          '''
+          if abs(point_1[0] - point_2[0]) > abs(point_1[1] - point_2[1]):
+            orientations.remove(1)
+            orientations.remove(3)
+          else:
+            orientations.remove(0)
+            orientations.remove(2)
+          '''
           lineDim = calcLineDim_(point_1, point_2)
           if lineDim == 0:
             orientations = [ori for ori in orientations if ori == 0 or ori == 2]
@@ -804,7 +813,7 @@ def findLineNeighbors(points, lines, labelVotesMap, gap):
         p2_to_l1 = [project_p_toline(p, lp1) for p in lp2]
 
         if p2p(lp1[0], p1_to_l2[0]) < gap: continue
-
+        #print('---------816----------')
         if all(pInLine(p, lp2) for p in p1_to_l2):
           if p2p(lp1[0], lp1[1]) < gap: continue
           if lineDim == 2:
@@ -812,23 +821,23 @@ def findLineNeighbors(points, lines, labelVotesMap, gap):
               region = [lp1[0], lp1[1], p1_to_l2[1], p1_to_l2[0]]
               lineNeighbors[lineIndex][0][neighborLineIndex] = region
               lineNeighbors[neighborLineIndex][1][lineIndex] = region
-              print(region, lp1, lp2, lineDim); exit(1)
+              #print(region, lp1, lp2, lineDim); exit(1)
             else:
               region = [p1_to_l2[0], p1_to_l2[1], lp1[1], lp1[0]]
               lineNeighbors[lineIndex][1][neighborLineIndex] = region
               lineNeighbors[neighborLineIndex][0][lineIndex] = region
-              print(region, lp1, lp2, lineDim); exit(1)
+              #print(region, lp1, lp2, lineDim); exit(1)
           else:
             if lp1[0][0] < p1_to_l2[0][0]:
               region = [lp1[1], lp1[0], p1_to_l2[0], p1_to_l2[1]]
               lineNeighbors[lineIndex][3][neighborLineIndex] = region
               lineNeighbors[neighborLineIndex][2][lineIndex] = region
-              print(region, lp1, lp2, lineDim); exit(1)
+              #print(region, lp1, lp2, lineDim); exit(1)
             else:
               region = [p1_to_l2[1], p1_to_l2[0], lp1[0], lp1[1]]
               lineNeighbors[lineIndex][2][neighborLineIndex] = region
               lineNeighbors[neighborLineIndex][3][lineIndex] = region
-              print(region, lp1, lp2, lineDim); exit(1)
+              #print(region, lp1, lp2, lineDim); exit(1)
 
         elif pInLine(p1_to_l2[0], lp2):
           if p2p(p1_to_l2[0], lp2[1]) < gap: continue
@@ -837,23 +846,23 @@ def findLineNeighbors(points, lines, labelVotesMap, gap):
               region = [lp1[0], p2_to_l1[1], lp2[1], p1_to_l2[0]]
               lineNeighbors[lineIndex][0][neighborLineIndex] = region
               lineNeighbors[neighborLineIndex][1][lineIndex] = region
-              print(region, lp1, lp2, lineDim); exit(1)
+              #print(region, lp1, lp2, lineDim); exit(1)
             else:
               region = [p1_to_l2[0], lp2[1], p2_to_l1[1], lp1[0]]
               lineNeighbors[lineIndex][1][neighborLineIndex] = region
               lineNeighbors[neighborLineIndex][0][lineIndex] = region
-              print(region, lp1, lp2, lineDim); exit(1)
+              #print(region, lp1, lp2, lineDim); exit(1)
           else:
             if lp1[0][0] < p1_to_l2[0][0]:
               region = [p2_to_l1[1], lp1[0], p1_to_l2[0], lp2[1]]
               lineNeighbors[lineIndex][3][neighborLineIndex] = region
               lineNeighbors[neighborLineIndex][2][lineIndex] = region
-              print(region, lp1, lp2, lineDim); exit(1)
+              #print(region, lp1, lp2, lineDim); exit(1)
             else:
               region = [lp2[1], p1_to_l2[0], lp1[0], p2_to_l1[1]]
               lineNeighbors[lineIndex][2][neighborLineIndex] = region
               lineNeighbors[neighborLineIndex][3][lineIndex] = region
-              print(region, lp1, lp2, lineDim); exit(1)
+              #print(region, lp1, lp2, lineDim); exit(1)
 
         elif pInLine(p1_to_l2[1], lp2):
            if p2p(p1_to_l2[1], lp2[0]) < gap: continue
@@ -862,23 +871,23 @@ def findLineNeighbors(points, lines, labelVotesMap, gap):
                region = [p2_to_l1[0], lp1[1], p1_to_l2[1], lp2[0]]
                lineNeighbors[lineIndex][0][neighborLineIndex] = region
                lineNeighbors[neighborLineIndex][1][lineIndex] = region
-               print(region, lp1, lp2, lineDim); exit(1)
+               #print(region, lp1, lp2, lineDim); exit(1)
              else:
                region = [lp2[0], p1_to_l2[1], lp1[1], p2_to_l1[0]]
                lineNeighbors[lineIndex][1][neighborLineIndex] = region
                lineNeighbors[neighborLineIndex][0][lineIndex] = region
-               print(region, lp1, lp2, lineDim); exit(1)
+               #print(region, lp1, lp2, lineDim); exit(1)
            else:
              if lp1[1][0] < p1_to_l2[1][0]:
                region = [lp1[1], p2_to_l1[0], lp2[0], p1_to_l2[1]]
                lineNeighbors[lineIndex][3][neighborLineIndex] = region
                lineNeighbors[neighborLineIndex][2][lineIndex] = region
-               print(region, lp1, lp2, lineDim); exit(1)
+               #print(region, lp1, lp2, lineDim); exit(1)
              else:
                region = [p1_to_l2[1], lp2[0], p2_to_l1[0], lp1[1]]
                lineNeighbors[lineIndex][2][neighborLineIndex] = region
                lineNeighbors[neighborLineIndex][3][lineIndex] = region
-               print(region, lp1, lp2, lineDim); exit(1)
+               #print(region, lp1, lp2, lineDim); exit(1)
 
         continue
 
@@ -936,7 +945,7 @@ def findLineNeighbors(points, lines, labelVotesMap, gap):
             moved_r2_p1, moved_r2_p0 = move_p_inline(r2_p1, [r2_p1, r2_p0]), move_p_inline(r2_p0, [r2_p0, r2_p1])
             p_r2_p1, p_r2_p0 = project_p_toline(moved_r2_p1, [r1_p0, r1_p1]), project_p_toline(moved_r2_p0, [r1_p0, r1_p1])
             if p_r2_p1[0] > r1_p1[0] and p_r2_p0 < r1_p0[0]:
-              print('-*'*10, 918); exit(1)
+              #print('-*'*10, 918); exit(1)
               lineNeighbors[neighbor_1][2].pop(neighbor_2)
               lineNeighbors[neighbor_2][3].pop(neighbor_1)
               hasChange = True
@@ -956,7 +965,7 @@ def findLineNeighbors(points, lines, labelVotesMap, gap):
             r1_p3, r1_p2 = region_1[3], region_1[2]
             moved_r2_p3, moved_r2_p2 = move_p_inline(r2_p3, [r2_p3, r2_p2]), move_p_inline(r2_p2, [r2_p2, r2_p3])
             p_r2_p3, p_r2_p2 = project_p_toline(moved_r2_p3, [r1_p3, r1_p2]), project_p_toline(moved_r2_p2, [r1_p3, r1_p2])
-            print('-*'*10, 938); exit(1)
+            #print('-*'*10, 938); exit(1)
 
           if lineDim < 2 and region_1[0][lineDim] < region_2[0][lineDim] + gap and region_1[1][lineDim] > region_2[1][lineDim] - gap or lineDim == 2 and p_r2_p3[0] > r1_p3[0] and p_r2_p2 < r1_p2[0]:
             lineNeighbors[neighbor_1][0].pop(neighbor_2)
@@ -975,11 +984,11 @@ def findLineNeighbors(points, lines, labelVotesMap, gap):
     for direction, neighbors in enumerate(directionNeighbors):
       for neighbor, region in neighbors.items():
         if lineDim == 2:
-          print('-*'*10, 957); exit(1)
-          labelVotes = labelVotesMap[:, region[3][1], region[3][0]] + labelVotesMap[:, region[1][1], region[1][0]] - labelVotesMap[:, region[2][1], region[2][0]] - labelVotesMap[:, region[0][1], region[0][0]]
+          #print('-*'*10, 957); exit(1)
+          labelVotes = labelVotesMap[:, int(region[3][1]), int(region[3][0])] + labelVotesMap[:, int(region[1][1]), int(region[1][0])] - labelVotesMap[:, int(region[2][1]), int(region[2][0])] - labelVotesMap[:, int(region[0][1]), int(region[0][0])]
         elif lineDim == 3:
-          print('-*'*10, 960); exit(1)
-          labelVotes = labelVotesMap[:, region[0][1], region[0][0]] + labelVotesMap[:, region[2][1], region[2][0]] - labelVotesMap[:, region[1][1], region[1][0]] - labelVotesMap[:, region[3][1], region[3][0]]
+          #print('-*'*10, 960, lineDim); #exit(1)
+          labelVotes = labelVotesMap[:, int(region[0][1]), int(region[0][0])] + labelVotesMap[:, int(region[2][1]), int(region[2][0])] - labelVotesMap[:, int(region[1][1]), int(region[1][0])] - labelVotesMap[:, int(region[3][1]), int(region[3][0])]
         else:
           labelVotes = labelVotesMap[:, region[1][1], region[1][0]] + labelVotesMap[:, region[0][1], region[0][0]] - labelVotesMap[:, region[0][1], region[1][0]] - labelVotesMap[:, region[1][1], region[0][0]]
         neighbors[neighbor] = labelVotes
@@ -1446,7 +1455,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     pass
   heatmapValueThresholdDoor = 0.5
   heatmapValueThresholdIcon = 0.5
-
+  #gap = 0.1
   if gap > 0:
     for k in GAPS:
       GAPS[k] = gap
@@ -1973,6 +1982,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
       wallPointLabels = [[-1, -1, -1, -1] for pointIndex in range(len(wallPoints))]
 
       for lineIndex, lineVar in enumerate(w_l):
+        #print(lineVar.varValue)
         if lineVar.varValue < 0.5:
           continue
         filteredWallLines.append(wallLines[lineIndex])
@@ -2013,7 +2023,6 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
         filteredWallLabels = [filteredWallLabels[lineIndex] for lineIndex in range(len(filteredWallLines)) if filteredWallLines[lineIndex][0] != filteredWallLines[lineIndex][1]]
         filteredWallLines = [line for line in filteredWallLines if line[0] != line[1]]
         pass
-
 
       drawLines(output_prefix + 'result_line.png', width, height, wallPoints, filteredWallLines, filteredWallLabels, lineColor=255)
       #resultImage = drawLines('', width, height, wallPoints, filteredWallLines, filteredWallLabels, None, lineWidth=5, lineColor=255)
