@@ -10,28 +10,6 @@ from skimage import measure
 import cv2
 import copy
 
-# distance between point and line
-def p2l(p, l):
-    return min(pointDistance(p, l[i]) for i in range(2))
-
-# intersection point between two lines
-def line(p1, p2):
-    A = (p1[1] - p2[1])
-    B = (p2[0] - p1[0])
-    C = (p1[0]*p2[1] - p2[0]*p1[1])
-    return A, B, -C
-
-def intersection(L1, L2):
-    D  = L1[0] * L2[1] - L1[1] * L2[0]
-    Dx = L1[2] * L2[1] - L1[1] * L2[2]
-    Dy = L1[0] * L2[2] - L1[2] * L2[0]
-    if D != 0:
-        x = Dx / D
-        y = Dy / D
-        return x,y
-    else:
-        return False
-
 def pointDistance(point_1, point_2):
     #return np.sqrt(pow(point_1[0] - point_2[0], 2) + pow(point_1[1] - point_2[1], 2))
     return max(abs(point_1[0] - point_2[0]), abs(point_1[1] - point_2[1]))
@@ -89,8 +67,9 @@ def findConnections(line_1, line_2, gap, fpath):
                     d.append(7 if p[0] > c[0] and p[1] < c[1] else 5)
             return sorted(d)
 
-        l1, l2 = line(*line_1), line(*line_2)
-        p = intersection(l1, l2)
+        #l1, l2 = line(*line_1), line(*line_2)
+        #p = intersection(l1, l2)
+        p = interLine(line_1, line_2)
         
         w1, w2 = pInLine(p, line_1, gap), pInLine(p, line_2, gap)
 

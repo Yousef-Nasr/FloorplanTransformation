@@ -111,9 +111,6 @@ def move_p_inline(p, line, gap=3):
     p0, p1 = line[0], line[1]
     vec = [p1[0] - p0[0], p1[1] - p0[1]]
     return move_p_invec(p, vec, gap)
-    #l = p2p(p0, p1)
-    #direction = [(p1[0] - p0[0]) / l, (p1[1] - p0[1]) / l]
-    #return [p[0] + gap * direction[0], p[1] + gap * direction[1]]
 
 # move point in direction of vector for gap distance
 def move_p_invec(p, v, gap=3):
@@ -129,6 +126,10 @@ def p2line(p, line):
   projected = project_p_toline(p, line)
   return p2p(p, projected)
 
+# Euclidean distance between two lines
+def line2line(l1, l2):
+  return (sum(p2line(p, l2) for p in l1) * 0.5 + sum(p2line(p, l1) for p in l2) * 0.5) * 0.5
+
 # projection of a point onto a line
 def project_p_toline(p, line):
 
@@ -141,6 +142,30 @@ def project_p_toline(p, line):
   n /= np.linalg.norm(n, 2)
 
   return u + n*np.dot(x - u, n)
+
+# distance between point and line
+def p2l(p, l):
+    return min(pointDistance(p, l[i]) for i in range(2))
+
+# intersection point between two lines
+def interLine(l1, l2):
+  def line(p1, p2):
+    A = (p1[1] - p2[1])
+    B = (p2[0] - p1[0])
+    C = (p1[0]*p2[1] - p2[0]*p1[1])
+    return A, B, -C
+
+  def intersection(L1, L2):
+    D  = L1[0] * L2[1] - L1[1] * L2[0]
+    Dx = L1[2] * L2[1] - L1[1] * L2[2]
+    Dy = L1[0] * L2[2] - L1[2] * L2[0]
+    if D != 0:
+        x = Dx / D
+        y = Dy / D
+        return x,y
+    else:
+        return False
+  return intersection(line(*l1), line(*l2))
 
 def calcLineDim2(points, line):
     point_1 = points[line[0]]
@@ -164,7 +189,7 @@ line dimension: (first point orientation, second point orientation)
 def calcLineDim(points, line, door=False):
     point_1 = points[line[0]]
     point_2 = points[line[1]]
-    return calcLineDim_(point_1, point_2)
+    return calcLineDim_(point_1, point_2, door)
 
 def calcLineDim_(point_1, point_2, door=False):
     if abs(point_2[0] - point_1[0]) > abs(point_2[1] - point_1[1]):
@@ -172,23 +197,18 @@ def calcLineDim_(point_1, point_2, door=False):
     else:
         lineDim = 1
     if door:
-      print(door)
       oris_1 = np.asarray(DOOR_ORIS[point_1[2]][point_1[3]])
       oris_2 = np.asarray(DOOR_ORIS[point_2[2]][point_2[3]])
-      print(oris_1, oris_2)
     else:
       try:
         oris_1 = np.asarray(POINT_ORIENTATIONS[point_1[2]][point_1[3]])
         oris_2 = np.asarray(POINT_ORIENTATIONS[point_2[2]][point_2[3]])
       except:
-        print(point_1, point_2, door); exit(1)
+        print(point_1, point_2, door); raise
 
     if any(oris_1 > 3) and any(oris_2 > 3):
         if 4 in oris_1 and 6 in oris_2 or 6 in oris_1 and 4 in oris_2: lineDim = 2
         elif 5 in oris_1 and 7 in oris_2 or 7 in oris_1 and 5 in oris_2: lineDim = 3
-        #else: print('-'*20, lineDim, point_1, point_2); exit(1)
-
-    #if lineDim == 3: print('-'*20, point_1, point_2)
 
     return lineDim
 
