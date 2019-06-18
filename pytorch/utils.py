@@ -2,6 +2,9 @@ import numpy as np
 import cv2
 from skimage.draw import polygon
 
+import torchvision.transforms.functional as F
+from PIL import Image
+
 # added 45 wall corner patterns and 4 opening corner patterns
 NUM_WALL_CORNERS = 58#13
 NUM_CORNERS = 70#21
@@ -167,6 +170,20 @@ def interLine(l1, l2):
         return False
   return intersection(line(*l1), line(*l2))
 
+# convert PIL image to ndarray
+def pil2np(img):
+  if isinstance(img, Image.Image):
+    img = np.asarray(img)
+  return img
+
+# convert ndarray to PIL image
+def np2pil(img):
+  if isinstance(img, np.ndarray):
+    if img.dtype != np.uint8:
+      img = img.astype(np.uint8)
+    img = F.to_pil_image(img)
+  return img
+
 def calcLineDim2(points, line):
     point_1 = points[line[0]]
     point_2 = points[line[1]]
@@ -215,6 +232,7 @@ def calcLineDim_(point_1, point_2, door=False):
 def calcLineDirection(line, gap=3):
     if isManhattan(line):
     	return int(abs(line[0][0] - line[1][0]) < abs(line[0][1] - line[1][1]))
+    # slant patterns
     return ((line[0][0] - line[1][0]) * (line[0][1] - line[1][1]) < 0) + 2
 
 def calcLineDirection2(line, gap=3):

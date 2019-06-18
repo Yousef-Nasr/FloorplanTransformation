@@ -10,6 +10,9 @@ from skimage import measure
 import cv2
 import copy
 
+import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
+
 def pointDistance(point_1, point_2):
     #return np.sqrt(pow(point_1[0] - point_2[0], 2) + pow(point_1[1] - point_2[1], 2))
     return max(abs(point_1[0] - point_2[0]), abs(point_1[1] - point_2[1]))
@@ -205,8 +208,8 @@ def getRoomLabelMap():
     labelMap['kitchen'] = 2
     labelMap['bedroom'] = 3
     labelMap['bathroom'] = 4
-    labelMap['restroom'] = 4
-    labelMap['washing_room'] = 4    
+    labelMap['restroom'] = 5
+    labelMap['washing_room'] = 9
     labelMap['office'] = 3
     labelMap['closet'] = 6
     labelMap['balcony'] = 7
@@ -294,12 +297,14 @@ def transformPoint(transformation, point):
 
 ## Plane dataset class
 class FloorplanDataset(Dataset):
-    def __init__(self, options, split, random=True):
+    def __init__(self, options, split, random=True, augment=False, test_batch=False):
         self.options = options
         self.split = split
         self.random = random
+        self.augment = augment
         self.imagePaths = []
         self.dataFolder = '../data/'
+        self.test_batch = test_batch
         with open(self.dataFolder + split + '.txt') as f:
             for line in f:
                 self.imagePaths.append([value.strip() for value in line.split('\t')])
@@ -334,6 +339,11 @@ class FloorplanDataset(Dataset):
             print(index, self.imagePaths[index][1])
             pass
         image = cv2.imread(self.dataFolder + self.imagePaths[index][0])
+
+        if self.test_batch:
+          image, _ = augmentSample(self.options, image, background_colors=[], split=self.split)
+          image = (image.astype(np.float32) / 255 - 0.5).transpose((2, 0, 1))
+          return [image, self.imagePaths[index][0]]
         image_ori = image
         image_width, image_height = image.shape[1], image.shape[0]
 
@@ -368,7 +378,7 @@ class FloorplanDataset(Dataset):
             pass
         #print([calcLineDirection(d) for d in doors])
         #print(doors)
-        gap = 3
+        gap = 5
         #print(semantics)
         invalid_indices = {}
         for wall_index_1, (wall_1, wall_type_1) in enumerate(zip(walls, wall_types)):
@@ -418,13 +428,16 @@ class FloorplanDataset(Dataset):
         width = self.options.width
         height = self.options.height
         #print('='*20, width, height)
+        #print('='*20, NUM_ROOMS); exit(1)
         roomSegmentation = np.zeros((height, width), dtype=np.uint8)
+        roomSegmentation2 = np.zeros((height, width, NUM_ROOMS+2), dtype=np.uint8)
         for line in walls:
             #cv2.line(roomSegmentation, line[0], line[1], color=NUM_ROOMS + 1 + calcLineDirection(line), thickness=gap)
             cv2.line(roomSegmentation, line[0], line[1], color=NUM_ROOMS + 1, thickness=gap)
             continue
-
+        roomSegmentation2[:, :, NUM_ROOMS + 1][roomSegmentation == NUM_ROOMS + 1] = 1
         rooms = measure.label(roomSegmentation == 0, background=0)
+        #print(rooms);exit(1)
         
         corner_gt = []
         for corner in corners:
@@ -447,18 +460,26 @@ class FloorplanDataset(Dataset):
                 break
             continue
         iconSegmentation = np.zeros((height, width), dtype=np.uint8)
+        iconSegmentation2 = np.zeros((height, width, NUM_ICONS + 2), dtype=np.uint8)
         for line in doors:
             cv2.line(iconSegmentation, line[0], line[1], color = self.labelMap['door'], thickness=gap - 1)
             continue
-
+        iconSegmentation2[:, :, self.labelMap['door']][iconSegmentation == self.labelMap['door']] = 1
         roomLabelMap = {}
         for semantic, items in semantics.items():
             group, label = self.labelMap[semantic]
+            #print('-' * 20)
+            #print(self.labelMap); exit(1)
             for corners in items:
                 if group == 'icons':
                     if label == 0:
                         continue
+                    #print(label)
                     cv2.rectangle(iconSegmentation, (int(round(corners[0][0])), int(round(corners[0][1]))), (int(round(corners[1][0])), int(round(corners[1][1]))), color=label, thickness=-1)
+                    #print(corners[0], corners[1])
+                    x0, x1, y0, y1 = int(round(corners[0][0])), int(round(corners[1][0])), int(round(corners[0][1])), int(round(corners[1][1]))
+                    x0, x1, y0, y1 = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
+                    iconSegmentation2[:, :, label][y0: y1+1, x0: x1+1] = 1
                     corner_gt.append((corners[0][0], corners[0][1], 9 + NUM_WALL_CORNERS + 2)) # 18
                     corner_gt.append((corners[0][0], corners[1][1], 9 + NUM_WALL_CORNERS + 1))
                     corner_gt.append((corners[1][0], corners[0][1], 9 + NUM_WALL_CORNERS + 3))
@@ -477,6 +498,7 @@ class FloorplanDataset(Dataset):
                         pass
                     roomLabelMap[roomIndex] = label
                     roomSegmentation[rooms == roomIndex] = label
+                    roomSegmentation2[:, :, label][rooms == roomIndex] = 1
                     pass
                 continue
             continue
@@ -492,6 +514,7 @@ class FloorplanDataset(Dataset):
                 continue
             if roomIndex not in roomLabelMap:
                 roomSegmentation[rooms == roomIndex] = 10
+                roomSegmentation2[:, :, 10][rooms == roomIndex] = 1
                 #print('room has no label', roomIndex, rooms.max(), np.stack((rooms == roomIndex).nonzero(), axis=-1).mean(0)[::-1])
                 #exit(1)
                 pass
@@ -501,9 +524,11 @@ class FloorplanDataset(Dataset):
         for corner in corner_gt:
             cornerSegmentation[min(max(corner[1], 0), height - 1), min(max(corner[0], 0), width - 1), corner[2] - 1] = 1
             continue
-
+        roomSegmentation = roomSegmentation2
+        iconSegmentation = iconSegmentation2
+        #if True:
         if False:
-            cv2.imwrite('test/image.png', image_ori)
+            cv2.imwrite('test/image.png', image)
             cv2.imwrite('test/icon_segmentation.png', drawSegmentationImage(iconSegmentation))
             cv2.imwrite('test/room_segmentation.png', drawSegmentationImage(roomSegmentation))
             cv2.imwrite('test/corner_segmentation.png', drawSegmentationImage(cornerSegmentation, blackIndex=0))
@@ -511,6 +536,46 @@ class FloorplanDataset(Dataset):
             exit(1)            
             pass
 
+        # data augmentation
+        #if False:
+        if self.split == 'train' and self.augment:
+          img_dtype = None
+          if image.dtype != np.uint8:
+            img_dtype = image.dtype
+
+          # random rotations
+          if np.random.randint(2) == 0:
+            ang = np.random.randint(360)
+            image = np.dstack([F.rotate(np2pil(image[:, :, i]), ang) for i in range(3)])
+            cornerSegmentation = np.dstack([F.rotate(np2pil(cornerSegmentation[:, :, i]), ang) for i in range(NUM_CORNERS)])
+            iconSegmentation = np.dstack([F.rotate(np2pil(iconSegmentation[:, :, i]), ang) for i in range(NUM_ICONS + 2)])
+            roomSegmentation = np.dstack([F.rotate(np2pil(roomSegmentation[:, :, i]), ang) for i in range(NUM_ROOMS + 2)])
+
+          # random h-flips
+          if np.random.randint(2) == 0:
+              image = np.dstack([F.hflip(np2pil(image[:, :, i])) for i in range(3)])
+              cornerSegmentation = np.dstack([F.hflip(np2pil(cornerSegmentation[:, :, i])) for i in range(NUM_CORNERS)])
+              iconSegmentation = np.dstack([F.hflip(np2pil(iconSegmentation[:, :, i])) for i in range(NUM_ICONS + 2)])
+              roomSegmentation = np.dstack([F.hflip(np2pil(roomSegmentation[:, :, i])) for i in range(NUM_ROOMS + 2)])
+
+          # random v-flips
+          if np.random.randint(2) == 0:
+              image = np.dstack([F.vflip(np2pil(image[:, :, i])) for i in range(3)])
+              cornerSegmentation = np.dstack([F.vflip(np2pil(cornerSegmentation[:, :, i])) for i in range(NUM_CORNERS)])
+              iconSegmentation = np.dstack([F.vflip(np2pil(iconSegmentation[:, :, i])) for i in range(NUM_ICONS + 2)])
+              roomSegmentation = np.dstack([F.vflip(np2pil(roomSegmentation[:, :, i])) for i in range(NUM_ROOMS + 2)])
+
+          # random crops
+          if np.random.randint(2) == 0:
+            i, j, h, w = transforms.RandomCrop.get_params(np2pil(cornerSegmentation), output_size=(height//2, width//2))
+            image = np.dstack([F.resized_crop(np2pil(image[:, :, ii]), i, j, h, w, (height, width)) for ii in range(3)])
+            cornerSegmentation = np.dstack([F.resized_crop(np2pil(cornerSegmentation[:, :, ii]), i, j, h, w, (height, width)) for ii in range(NUM_CORNERS)])
+            iconSegmentation = np.dstack([F.resized_crop(np2pil(iconSegmentation[:, :, ii]), i, j, h, w, (height, width)) for ii in range(NUM_ICONS + 2)])
+            roomSegmentation = np.dstack([F.resized_crop(np2pil(roomSegmentation[:, :, ii]), i, j, h, w, (height, width)) for ii in range(NUM_ROOMS + 2)])
+
+          if img_dtype:
+            image = image.astype(img_dtype)
+          #print(cornerSegmentation.shape, iconSegmentation.shape, roomSegmentation.shape, image.shape)
 
         image = (image.astype(np.float32) / 255 - 0.5).transpose((2, 0, 1))
         kernel = np.zeros((3, 3), dtype=np.uint8)
@@ -518,5 +583,7 @@ class FloorplanDataset(Dataset):
         kernel[:, 1] = 1
         cornerSegmentation = cv2.dilate(cornerSegmentation, kernel, iterations=5)
 
-        sample = [image, cornerSegmentation.astype(np.float32), iconSegmentation.astype(np.int64), roomSegmentation.astype(np.int64)]
+        #print(cornerSegmentation.shape, iconSegmentation.shape, roomSegmentation.shape, image.shape)
+        #sample = [image, cornerSegmentation.astype(np.float32), iconSegmentation.astype(np.int64), roomSegmentation.astype(np.int64)]
+        sample = [image, cornerSegmentation.astype(np.float32), iconSegmentation.astype(np.float32), roomSegmentation.astype(np.float32)]
         return sample

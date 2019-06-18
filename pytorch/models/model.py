@@ -20,4 +20,4 @@ class Model(nn.Module):
         features = self.feature_conv(features)
         segmentation = self.upsample(self.segmentation_pred(features))
         segmentation = segmentation.transpose(1, 2).transpose(2, 3).contiguous()
-        return torch.sigmoid(segmentation[:, :, :, :NUM_CORNERS]), segmentation[:, :, :, NUM_CORNERS:NUM_CORNERS + NUM_ICONS + 2], segmentation[:, :, :, -(NUM_ROOMS + 2):]
+        return segmentation[:, :, :, :NUM_CORNERS], segmentation[:, :, :, NUM_CORNERS:NUM_CORNERS + NUM_ICONS + 2], segmentation[:, :, :, -(NUM_ROOMS + 2):]
