@@ -28,7 +28,7 @@ def main(options):
     model.cuda()
     model.train()
 
-    base = 0
+    base = 400
 
     if options.restore == 1:
         print('restore from ' + options.checkpoint_dir + '/checkpoint_%d.pth' % (base))
@@ -49,8 +49,8 @@ def main(options):
         testBatch(options, model, dataset_test)
         exit(1)
 
-    dataset = FloorplanDataset(options, split='train', random=True, augment=False)
-    print('the number of training images', len(dataset), ', batch size: ', options.batchSize)    
+    dataset = FloorplanDataset(options, split='train', random=True, augment=options.augment)
+    print('the number of training images', len(dataset), ', batch size: ', options.batchSize, ' augment: ', options.augment)    
     dataloader = DataLoader(dataset, batch_size=options.batchSize, shuffle=True, num_workers=16)
    
     optimizer = torch.optim.Adam(model.parameters(), lr = options.LR)
@@ -101,7 +101,7 @@ def main(options):
                       pass
               continue
           print('loss', np.array(epoch_losses).mean(0))
-          if (epoch + 1) % 50 == 0:
+          if (epoch + 1) % 100 == 0:
               torch.save(model.state_dict(), options.checkpoint_dir + '/checkpoint_%d.pth' % (base + epoch + 1))
               torch.save(optimizer.state_dict(), options.checkpoint_dir + '/optim_%d.pth' % (base + epoch + 1))
               pass

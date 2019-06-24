@@ -9,6 +9,7 @@ from utils import *
 from skimage import measure
 import cv2
 import copy
+import os
 
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
@@ -528,10 +529,11 @@ class FloorplanDataset(Dataset):
         iconSegmentation = iconSegmentation2
         #if True:
         if False:
-            cv2.imwrite('test/image.png', image)
-            cv2.imwrite('test/icon_segmentation.png', drawSegmentationImage(iconSegmentation))
-            cv2.imwrite('test/room_segmentation.png', drawSegmentationImage(roomSegmentation))
-            cv2.imwrite('test/corner_segmentation.png', drawSegmentationImage(cornerSegmentation, blackIndex=0))
+            img_path = os.path.splitext(self.imagePaths[index][0])[0].split('/')[-1]
+            cv2.imwrite('test/%s_image.png' % img_path, image)
+            cv2.imwrite('test/%s_icon_segmentation.png' % img_path, drawSegmentationImage(iconSegmentation))
+            cv2.imwrite('test/%s_room_segmentation.png' % img_path, drawSegmentationImage(roomSegmentation))
+            cv2.imwrite('test/%s_corner_segmentation.png' % img_path, drawSegmentationImage(cornerSegmentation, blackIndex=0))
             print([(seg.min(), seg.max(), seg.shape) for seg in [cornerSegmentation, iconSegmentation, roomSegmentation]])
             exit(1)            
             pass
@@ -545,7 +547,8 @@ class FloorplanDataset(Dataset):
 
           # random rotations
           if np.random.randint(2) == 0:
-            ang = np.random.randint(360)
+            #ang = np.random.randint(360)
+            ang = np.random.choice([90, -90])
             image = np.dstack([F.rotate(np2pil(image[:, :, i]), ang) for i in range(3)])
             cornerSegmentation = np.dstack([F.rotate(np2pil(cornerSegmentation[:, :, i]), ang) for i in range(NUM_CORNERS)])
             iconSegmentation = np.dstack([F.rotate(np2pil(iconSegmentation[:, :, i]), ang) for i in range(NUM_ICONS + 2)])

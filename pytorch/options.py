@@ -79,6 +79,11 @@ def parse_args():
     parser.add_argument('--suffix', dest='suffix',
                         help='suffix to distinguish experiments',
                         default='', type=str)    
+
+    parser.add_argument('--augment', dest='augment',
+                        help='augment image data or not',
+                        default=False, type=bool)    
     
+
     args = parser.parse_args()
     return args
