@@ -28,11 +28,11 @@ def main(options):
     model.cuda()
     model.train()
 
-    base = 400
+    base = 'best'
 
     if options.restore == 1:
-        print('restore from ' + options.checkpoint_dir + '/checkpoint_%d.pth' % (base))
-        model.load_state_dict(torch.load(options.checkpoint_dir + '/checkpoint_%d.pth' % (base)))
+        print('restore from ' + options.checkpoint_dir + '/checkpoint_%s.pth' % (base))
+        model.load_state_dict(torch.load(options.checkpoint_dir + '/checkpoint_%s.pth' % (base)))
         pass
     
     if options.task == 'test':
@@ -46,21 +46,22 @@ def main(options):
         print('-'*20, 'test_batch')
         dataset_test = FloorplanDataset(options, split='test_batch', random=False, test_batch=True)
         print('the number of test_batch images', len(dataset_test))    
-        testBatch(options, model, dataset_test)
+        testBatch_unet(options, model, dataset_test)
         exit(1)
 
-    dataset = FloorplanDataset(options, split='train', random=True, augment=options.augment)
+    dataset = FloorplanDataset(options, split='sb_train++', random=True, augment=options.augment)
     print('the number of training images', len(dataset), ', batch size: ', options.batchSize, ' augment: ', options.augment)    
     dataloader = DataLoader(dataset, batch_size=options.batchSize, shuffle=True, num_workers=16)
    
     optimizer = torch.optim.Adam(model.parameters(), lr = options.LR)
-    if options.restore == 1 and os.path.exists(options.checkpoint_dir + '/optim_%d.pth' % (base)):
-        print('optimizer using ' + options.checkpoint_dir + '/optim_%d.pth' % (base))
-        optimizer.load_state_dict(torch.load(options.checkpoint_dir + '/optim_%d.pth' % (base)))
+    if options.restore == 1 and os.path.exists(options.checkpoint_dir + '/optim_%s.pth' % (base)):
+        print('optimizer using ' + options.checkpoint_dir + '/optim_%s.pth' % (base))
+        optimizer.load_state_dict(torch.load(options.checkpoint_dir + '/optim_%s.pth' % (base)))
         pass
 
     with open('loss_file.csv', 'w') as loss_file:
       writer = csv.writer(loss_file, delimiter=',', quotechar='"')
+      best_loss = np.float('inf')
       for epoch in range(options.numEpochs):
           epoch_losses = []
           data_iterator = tqdm(dataloader, total=len(dataset) // options.batchSize + 1)
@@ -102,10 +103,15 @@ def main(options):
               continue
           print('loss', np.array(epoch_losses).mean(0))
           if (epoch + 1) % 100 == 0:
-              torch.save(model.state_dict(), options.checkpoint_dir + '/checkpoint_%d.pth' % (base + epoch + 1))
-              torch.save(optimizer.state_dict(), options.checkpoint_dir + '/optim_%d.pth' % (base + epoch + 1))
+              torch.save(model.state_dict(), options.checkpoint_dir + '/checkpoint_%d.pth' % (int(base) + epoch + 1))
+              torch.save(optimizer.state_dict(), options.checkpoint_dir + '/optim_%d.pth' % (int(base) + epoch + 1))
               pass
 
+          if loss.item() < best_loss:
+              best_loss = loss.item()
+              torch.save(model.state_dict(), options.checkpoint_dir + '/checkpoint_best.pth')
+              torch.save(optimizer.state_dict(), options.checkpoint_dir + '/optim_best.pth')
+              print('best loss: ', best_loss)
           #testOneEpoch(options, model, dataset_test)        
           continue
       return
@@ -166,6 +172,43 @@ def testOneEpoch(options, model, dataset):
     model.train()
     return
 
+def testBatch_unet(options, model, dataset):
+    model.eval()
+
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=16)
+
+
+    data_iterator = tqdm(dataloader, total=len(dataset))
+    for sampleIndex, sample in enumerate(data_iterator):
+        images, img_path = sample[0].cuda(), sample[1][0]
+        img_name = os.path.splitext(img_path)[0].split('/')[-1]
+
+        corner_pred, icon_pred, room_pred = model(images)
+
+        room_unet = np.load('../../UNets/sb_preds_1000/%s.npy' % img_name).transpose(1,2,0)
+        #corner_hg = np.load('../../pytorch-pose/val_res_0725_mse/%s.npy' % img_name)[0].transpose(1,2,0)
+
+        visualizeBatch(options, images.detach().cpu().numpy(), [('pred', {'corner': corner_pred.max(-1)[1].detach().cpu().numpy(), 
+                                                                          'icon': icon_pred.max(-1)[1].detach().cpu().numpy(), 
+                                                                          'room': room_pred.max(-1)[1].detach().cpu().numpy()})], batch_img_name = img_name)         
+
+        for batchIndex in range(len(images)):
+          corner_heatmaps = torch.sigmoid(corner_pred[batchIndex]).detach().cpu().numpy()
+          #corner_heatmaps = corner_hg
+          #print(corner_heatmaps.shape); exit(1)
+          icon_heatmaps = torch.sigmoid(icon_pred[batchIndex]).detach().cpu().numpy()
+          #room_heatmaps = torch.sigmoid(room_pred[batchIndex]).detach().cpu().numpy()
+          room_heatmaps = torch.nn.functional.softmax(torch.from_numpy(room_unet), dim=-1).detach().cpu().numpy()
+
+          reconstructFloorplan(corner_heatmaps[:, :, :NUM_WALL_CORNERS], corner_heatmaps[:, :, NUM_WALL_CORNERS:NUM_WALL_CORNERS + 8],
+                               corner_heatmaps[:, :, -4:], icon_heatmaps, room_heatmaps, output_prefix=options.test_dir + '/' + img_name + '_',
+                               densityImage=None, gt_dict=None, gt=False, gap=-1, distanceThreshold=-1, lengthThreshold=-1, debug_prefix='test',
+                               heatmapValueThresholdWall=None, heatmapValueThresholdDoor=None, heatmapValueThresholdIcon=None, enableAugmentation=True)
+          continue
+        continue
+    return
+
+
 def testBatch(options, model, dataset):
     model.eval()
     
@@ -176,17 +219,23 @@ def testBatch(options, model, dataset):
         images, img_path = sample[0].cuda(), sample[1][0]
         img_name = os.path.splitext(img_path)[0].split('/')[-1]
 
-        #if int(img_name) < 61: continue
         corner_pred, icon_pred, room_pred = model(images)
 
-        visualizeBatch(options, images.detach().cpu().numpy(), [('pred', {'corner': corner_pred.max(-1)[1].detach().cpu().numpy(), 'icon': icon_pred.max(-1)[1].detach().cpu().numpy(), 'room': room_pred.max(-1)[1].detach().cpu().numpy()})], batch_img_name = img_name)         
+        '''
+        visualizeBatch(options, images.detach().cpu().numpy(), [('pred', {'corner': corner_pred.max(-1)[1].detach().cpu().numpy(), 
+                                                                          'icon': icon_pred.max(-1)[1].detach().cpu().numpy(), 
+                                                                          'room': room_pred.max(-1)[1].detach().cpu().numpy()})], batch_img_name = img_name)         
+        '''
 
         for batchIndex in range(len(images)):
           corner_heatmaps = torch.sigmoid(corner_pred[batchIndex]).detach().cpu().numpy()
           icon_heatmaps = torch.sigmoid(icon_pred[batchIndex]).detach().cpu().numpy()
           room_heatmaps = torch.sigmoid(room_pred[batchIndex]).detach().cpu().numpy()
 
-          reconstructFloorplan(corner_heatmaps[:, :, :NUM_WALL_CORNERS], corner_heatmaps[:, :, NUM_WALL_CORNERS:NUM_WALL_CORNERS + 8], corner_heatmaps[:, :, -4:], icon_heatmaps, room_heatmaps, output_prefix=options.test_dir + '/' + img_name + '_', densityImage=None, gt_dict=None, gt=False, gap=-1, distanceThreshold=-1, lengthThreshold=-1, debug_prefix='test', heatmapValueThresholdWall=None, heatmapValueThresholdDoor=None, heatmapValueThresholdIcon=None, enableAugmentation=True)
+          reconstructFloorplan(corner_heatmaps[:, :, :NUM_WALL_CORNERS], corner_heatmaps[:, :, NUM_WALL_CORNERS:NUM_WALL_CORNERS + 8], corner_heatmaps[:, :, -4:], 
+                               icon_heatmaps, room_heatmaps, output_prefix=options.test_dir + '/' + img_name + '_', densityImage=None, gt_dict=None, gt=False, gap=-1, 
+                               distanceThreshold=-1, lengthThreshold=-1, debug_prefix='test', heatmapValueThresholdWall=None, heatmapValueThresholdDoor=None, 
+                               heatmapValueThresholdIcon=None, enableAugmentation=True)
           continue
         continue
     model.train()
