@@ -306,8 +306,23 @@ class FloorplanDataset(Dataset):
         self.imagePaths = []
         self.dataFolder = '../data/'
         self.test_batch = test_batch
+
+        bad_anno = ['./anno_label/dqf788hn0qar6zm_stitch.txt',
+                    './anno_label/yxty88e5y7o50ra_stitch.txt',
+                    './anno_label/7k0a88hn0qar1qq_stitch.txt',
+                    './anno_label/4a4h88m7e6ehsvl_stitch.txt',
+                    './anno_label/ljpg88k3305opsi_stitch.txt',
+                    './anno_label/6ier88q3ct0zqhi_stitch.txt',
+                    './anno_label/mk7y88q3ct11idi_stitch.txt',
+                    './anno_label/46ur88o6shg1w7a_stitch.txt',
+                    './anno_label/ua6x88q3ct10buy_stitch.txt',
+                    './anno_label/to3488mncf9aazu_stitch.txt',
+                    './anno_label/1fp788jhfvcqm0e_stitch.txt',
+                    ]
+
         with open(self.dataFolder + split + '.txt') as f:
             for line in f:
+                #if line.split('\t')[1][:-1] in bad_anno: continue
                 self.imagePaths.append([value.strip() for value in line.split('\t')])
                 continue
             
@@ -364,6 +379,7 @@ class FloorplanDataset(Dataset):
             for line in info_file:
                 line = line.split('\t')
                 label = line[4].strip()
+                if label == 'point': continue
                 if label == 'wall':
                     walls.append((convertToPoint(line[0], line[1]), convertToPoint(line[2], line[3])))
                     wall_types.append(int(line[5].strip()) - 1)
