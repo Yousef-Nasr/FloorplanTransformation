@@ -7,11 +7,13 @@ import csv
 import copy
 from utils import *
 from skimage import measure
+from skimage.draw import polygon
 
 GAPS = {'wall_extraction': 5, 'door_extraction': 5, 'icon_extraction': 5, 'wall_neighbor': 5, 'door_neighbor': 5, 'icon_neighbor': 5, 'wall_conflict': 5, 'door_conflict': 5, 'icon_conflict': 5, 'wall_icon_neighbor': 5, 'wall_icon_conflict': 5, 'wall_door_neighbor': 5, 'door_point_conflict': 5}
 DISTANCES = {'wall_icon': 5, 'point': 5, 'wall': 10, 'door': 5, 'icon': 5}
 LENGTH_THRESHOLDS = {'wall': 5, 'door': 5, 'icon': 5}
 
+_printRecons = False
 
 junctionWeight = 100
 augmentedJunctionWeight = 50
@@ -88,11 +90,11 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
       cornerOrientations += orientations
       continue
   elif cornerType == 'door':
-    cornerOrientations = POINT_ORIENTATIONS[0]
+    cornerOrientations = [(0,), (1,), (2,), (3,), (4,), (5,), (6,), (7,)]#POINT_ORIENTATIONS[0]
   else:
     cornerOrientations = [(0, 3), (0, 1), (1, 2), (2, 3)]#POINT_ORIENTATIONS[1]
     pass
-  #print(orientationPoints)
+  #print_recons(_printRecons, orientationPoints)
   if augment:
     orientationMap = {}
     for pointType, orientationOrientations in enumerate(POINT_ORIENTATIONS):
@@ -100,7 +102,7 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
         orientationMap[orientations] = orientation
         continue
       continue
-
+    #print_recons(_printRecons, orientationMap)
     for orientationIndex, corners in enumerate(orientationPoints):
       if len(corners) > 3:
         continue #skip aug
@@ -119,12 +121,11 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
             continue
           newOrientation = orientationMap[newOrientations]
           for corner in corners:
-            #print('-'*20, corner, corner + (True, ))
+            #print_recons(_printRecons, '-'*20, orientations, orientation, corner)
             orientationPoints[4 + newOrientation].append(corner + (True, ))
             continue
           continue
       elif pointType in [1]:
-        #orientation = orientationIndex % 4
         orientation = get_ori(orientationIndex)
         orientations = POINT_ORIENTATIONS[pointType][orientation]
         for orientation in range(8):
@@ -137,13 +138,14 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
             continue
           newOrientation = orientationMap[newOrientations]
           for corner in corners:
+            #print_recons(_printRecons, '-'*20, orientations, orientation, corner)
             orientationPoints[28 + newOrientation].append(corner + (True, ))
             continue
           continue
         pass
       continue
     pass
-  #print(orientationPoints)
+  #print_recons(_printRecons, orientationPoints)
   pointOffset = 0
   pointOffsets = []
   points = []
@@ -151,6 +153,7 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
   for orientationIndex, corners in enumerate(orientationPoints):
     pointOffsets.append(pointOffset)
     orientations = cornerOrientations[orientationIndex]
+    #print_recons(_printRecons, '-'*20, orientations)
     for point in corners:
       orientationLines = {}
       for orientation in orientations:
@@ -160,9 +163,12 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
       continue
 
     pointOffset += len(corners)
-
+    aug = []
     if cornerType == 'wall':
       points += [[corner[0][0], corner[0][1], get_pt(orientationIndex), get_ori(orientationIndex)] for corner in corners]
+
+      aug += [[corner[0][0], corner[0][1], get_pt(orientationIndex), get_ori(orientationIndex)] for corner in corners if corner[-1] == True]
+      #print_recons(_printRecons, orientationIndex, aug)
     elif cornerType == 'door':
       points += [[corner[0][0], corner[0][1], 0, orientationIndex] for corner in corners]
     else:
@@ -172,11 +178,10 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
 
   augmentedPointMask = {}
 
-
   lines = []
   pointNeighbors = [[] for point in points]
-
   for orientationIndex, corners in enumerate(orientationPoints):
+    #print_recons(_printRecons, orientationIndex, corners)
     orientations = cornerOrientations[orientationIndex]
     for orientation in orientations:
       #if orientation not in [1, 2]: continue
@@ -186,17 +191,17 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
           oppositeOrientation = orientation + 2
       else:
           oppositeOrientation = orientation - 2
-      if orientation > 3: continue
+
       lineDim = -1
       if orientation in [0, 2]:
-        lineDim = 1
-      elif orientation in [1, 3]:
         lineDim = 0
+      elif orientation in [1, 3]:
+        lineDim = 1
         pass
 
       for cornerIndex, corner in enumerate(corners):
         pointIndex = pointOffsets[orientationIndex] + cornerIndex
-        #print(corner)
+        #print_recons(_printRecons, corner)
         if len(corner) > 3:
           augmentedPointMask[pointIndex] = True
           pass
@@ -206,9 +211,6 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
           ranges[lineDim + 2] = max(ranges[lineDim + 2], corner[0][lineDim])
           ranges[1 - lineDim] = min(ranges[1 - lineDim], corner[1][1 - lineDim] - gap)
           ranges[1 - lineDim + 2] = max(ranges[1 - lineDim + 2], corner[2][1 - lineDim] + gap)
-        else:
-          print('-'*20, orientation, ranges)
-          pass
 
         for oppositeOrientationIndex, oppositeCorners in enumerate(orientationPoints):
           if oppositeOrientation not in cornerOrientations[oppositeOrientationIndex]:
@@ -218,14 +220,28 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
               continue
 
             oppositePointIndex = pointOffsets[oppositeOrientationIndex] + oppositeCornerIndex
-
             if orientation < 4:
               if oppositeCorner[0][lineDim] < ranges[lineDim] or oppositeCorner[0][lineDim] > ranges[lineDim + 2] or ranges[1 - lineDim] > oppositeCorner[2][1 - lineDim] or ranges[1 - lineDim + 2] < oppositeCorner[1][1 - lineDim]:
                 continue
+              if abs(oppositeCorner[0][lineDim] - corner[0][lineDim]) < LENGTH_THRESHOLDS[cornerType]: continue
+            else:
+              #if orientation == 4 and (True not in corner and True not in oppositeCorner): print_recons(_printRecons, oppositeCorner[0][0], corner[1][0]-gap, oppositeCorner[0][1], corner[1][1]-gap)
+              #if orientation == 6 and (True not in corner and True not in oppositeCorner): print_recons(_printRecons, oppositeCorner[0][0], corner[2][0]+gap, oppositeCorner[0][1], corner[2][1]+gap)
+              #if orientation == 5 and (True not in corner and True not in oppositeCorner): print_recons(_printRecons, oppositeCorner[0][0], corner[1][0]-gap, oppositeCorner[0][1], corner[2][1]+gap); print_recons(_printRecons, corner, oppositeCorner)
+              '''
+              if orientation == 4 and not (oppositeCorner[0][0] < corner[1][0]-gap and oppositeCorner[0][1] < corner[1][1]-gap): continue
+              if orientation == 5 and not (oppositeCorner[0][0] < corner[1][0]-gap and oppositeCorner[0][1] > corner[2][1]+gap): continue
+              if orientation == 6 and not (oppositeCorner[0][0] > corner[2][0]+gap and oppositeCorner[0][1] > corner[2][1]+gap): continue
+              if orientation == 7 and not (oppositeCorner[0][0] > corner[2][0]+gap and oppositeCorner[0][1] < corner[1][1]-gap): continue
+              '''
+              if orientation == 4 and not (oppositeCorner[0][0] < corner[1][0] and oppositeCorner[0][1] < corner[1][1]): continue
+              if orientation == 5 and not (oppositeCorner[0][0] < corner[1][0] and oppositeCorner[0][1] > corner[2][1]): continue
+              if orientation == 6 and not (oppositeCorner[0][0] > corner[2][0] and oppositeCorner[0][1] > corner[2][1]): continue
+              if orientation == 7 and not (oppositeCorner[0][0] > corner[2][0] and oppositeCorner[0][1] < corner[1][1]): continue
 
+              if abs(oppositeCorner[0][0] - corner[0][0]) < LENGTH_THRESHOLDS[cornerType] or abs(oppositeCorner[0][1] - corner[0][1]) < LENGTH_THRESHOLDS[cornerType]: continue
 
-              if abs(oppositeCorner[0][lineDim] - corner[0][lineDim]) < LENGTH_THRESHOLDS[cornerType]:
-                continue
+              if True not in corner and True not in oppositeCorner: print_recons(_printRecons, 'detected slant lines: ', cornerType, corner, oppositeCorner, orientation, oppositeOrientation)
 
             lineIndex = len(lines)
             pointOrientationLinesMap[pointIndex][orientation].append(lineIndex)
@@ -244,6 +260,7 @@ def extractCorners(heatmaps, threshold, gap, cornerType = 'wall', augment=False,
 
 ## Corner type augmentation to enrich the candidate set (e.g., a T-shape corner can be treated as a L-shape corner)
 def augmentPoints(points, decreasingTypes = [2], increasingTypes = [1]):
+  print_recons(_printRecons, 'augmentPoints'); exit(1)
   orientationMap = {}
   for pointType, orientationOrientations in enumerate(POINT_ORIENTATIONS):
     for orientation, orientations in enumerate(orientationOrientations):
@@ -348,25 +365,34 @@ def filterWalls(wallPoints, wallLines):
       continue
     continue
 
-  #print(POINT_ORIENTATIONS)
-
+  #print_recons(_printRecons, POINT_ORIENTATIONS)
   while True:
     pointOrientationNeighborsMap = {}
     for line in wallLines:
+      #print_recons(_printRecons, '-'*10, (wallPoints[line[0]], wallPoints[line[1]]))
       lineDim = calcLineDim(wallPoints, line)
+      #if lineDim > 1: print_recons(_printRecons, '-*'*10, 368); exit(1)
       for c, pointIndex in enumerate(line):
         if lineDim == 0:
           if c == 0:
-            orientation = 1
+            orientation = 2#1
           else:
-            orientation = 3
+            orientation = 0#3
+        elif lineDim == 1:
+          if c == 0:
+            orientation = 1#2
+          else:
+            orientation = 3#0
+        elif lineDim == 2:
+          if c == 0:
+            orientation = 6#1
+          else:
+            orientation = 4#3
         else:
           if c == 0:
-            orientation = 2
+            orientation = 7#2
           else:
-            orientation = 0
-            pass
-          pass
+            orientation = 5#0
 
         if pointIndex not in pointOrientationNeighborsMap:
           pointOrientationNeighborsMap[pointIndex] = {}
@@ -375,9 +401,9 @@ def filterWalls(wallPoints, wallLines):
           pointOrientationNeighborsMap[pointIndex][orientation] = []
           pass
         pointOrientationNeighborsMap[pointIndex][orientation].append(line[1 - c])
+        #print_recons(_printRecons, pointOrientationNeighborsMap); exit(1)
         continue
       continue
-
 
     invalidPointMask = {}
     for pointIndex, point in enumerate(wallPoints):
@@ -388,15 +414,15 @@ def filterWalls(wallPoints, wallLines):
       try:
         orientations = POINT_ORIENTATIONS[point[2]][point[3]]
       except:
-        #print('-'*20, point[2], point[3])
+        #print_recons(_printRecons, '-'*20, point[2], point[3])
         raise
       if len(orientationNeighborMap) < len(orientations):
         if len(orientationNeighborMap) >= 2 and tuple(orientationNeighborMap.keys()) in orientationMap:
           newOrientation = orientationMap[tuple(orientationNeighborMap.keys())]
           wallPoints[pointIndex][2] = len(orientationNeighborMap) - 1
           wallPoints[pointIndex][3] = newOrientation
-          #print(orientationNeighborMap)
-          #print('new', len(orientationNeighborMap), newOrientation)
+          #print_recons(_printRecons, orientationNeighborMap)
+          #print_recons(_printRecons, 'new', len(orientationNeighborMap), newOrientation)
           continue
         invalidPointMask[pointIndex] = True
         pass
@@ -431,20 +457,30 @@ def filterWalls(wallPoints, wallLines):
 
   for lineIndex, line in enumerate(wallLines):
     lineDim = calcLineDim(wallPoints, line)
+    #if lineDim > 1: print_recons(_printRecons, '-*'*10, 445); exit(1)
     for c, pointIndex in enumerate(line):
       if lineDim == 0:
-        if wallPoints[pointIndex][lineDim] < wallPoints[line[1 - c]][lineDim]:
-          orientation = 1
-        else:
-          orientation = 3
-          pass
-      else:
         if wallPoints[pointIndex][lineDim] < wallPoints[line[1 - c]][lineDim]:
           orientation = 2
         else:
           orientation = 0
           pass
-        pass
+      elif lineDim == 1:
+        if wallPoints[pointIndex][lineDim] < wallPoints[line[1 - c]][lineDim]:
+          orientation = 1
+        else:
+          orientation = 3
+      elif lineDim == 2:
+        if wallPoints[pointIndex][0] < wallPoints[line[1 - c]][0] and wallPoints[pointIndex][1] < wallPoints[line[1 - c]][1]:
+          orientation = 6
+        else:
+          orientation = 4
+          pass
+      else:
+        if wallPoints[pointIndex][0] < wallPoints[line[1 - c]][0] and wallPoints[pointIndex][1] > wallPoints[line[1 - c]][1]:
+          orientation = 7
+        else:
+          orientation = 5
 
       if orientation not in pointOrientationLinesMap[pointIndex]:
         pointOrientationLinesMap[pointIndex][orientation] = []
@@ -453,7 +489,6 @@ def filterWalls(wallPoints, wallLines):
       pointNeighbors[pointIndex].append(line[1 - c])
       continue
     continue
-
   return wallPoints, wallLines, pointOrientationLinesMap, pointNeighbors
 
 ## Write wall points to result file
@@ -464,11 +499,12 @@ def writePoints(points, pointLabels, output_prefix='test/'):
       points_file.write(str(point[0] + 1) + '\t' + str(point[1] + 1) + '\t')
       points_file.write('point\t')
       points_file.write(str(point[2] + 1) + '\t' + str(point[3] + 1) + '\n')
+
   points_file.close()
 
   with open(output_prefix + 'point_labels.txt', 'w') as point_label_file:
     for point in pointLabels:
-      point_label_file.write(str(point[0]) + '\t' + str(point[1]) + '\t' + str(point[2]) + '\t' + str(point[3]) + '\n')
+      point_label_file.write(str(point[0]) + '\t' + str(point[1]) + '\t' + str(point[2]) + '\t' + str(point[3]) + '\t' + str(point[4]) + '\t' + str(point[5]) + '\t' + str(point[6]) + '\t' + str(point[7]) + '\n')
   point_label_file.close()
 
 ## Write doors to result file
@@ -484,7 +520,7 @@ def writeDoors(points, lines, doorTypes, output_prefix='test/'):
       doors_file.write(str(doorTypes[lineIndex] + 1) + '\t1\n')
     doors_file.close()
 
-## Write icons to result file    
+## Write icons to result file
 def writeIcons(points, icons, iconTypes, output_prefix='test/'):
   with open(output_prefix + 'icons_out.txt', 'w') as icons_file:
     for iconIndex, icon in enumerate(icons):
@@ -512,11 +548,12 @@ def adjustPoints(points, lines):
   lineNeighbors = []
   for lineIndex, line in enumerate(lines):
     lineDim = calcLineDim(points, line)
+    #if lineDim > 1: print_recons(_printRecons, '-*'*10, 531); exit(1)
     neighbors = []
     for neighborLineIndex, neighborLine in enumerate(lines):
       if neighborLineIndex <= lineIndex:
         continue
-      neighborLineDim = calcLineDim(points, neighborLine)
+      #neighborLineDim = calcLineDim(points, neighborLine)
       point_1 = points[neighborLine[0]]
       point_2 = points[neighborLine[1]]
       lineDimNeighbor = calcLineDim(points, neighborLine)
@@ -556,7 +593,7 @@ def adjustPoints(points, lines):
       visitedLines[line] = True
       continue
 
-    #print([[points[pointIndex] for pointIndex in lines[lineIndex]] for lineIndex in lineGroup], calcLineDim(points, lines[lineGroup[0]]))
+    #print_recons(_printRecons, [[points[pointIndex] for pointIndex in lines[lineIndex]] for lineIndex in lineGroup], calcLineDim(points, lines[lineGroup[0]]))
 
     pointGroup = []
     for line in lineGroup:
@@ -568,26 +605,45 @@ def adjustPoints(points, lines):
         continue
       continue
 
-    #lineDim = calcLineDim(points, lines[lineGroup[0]])
     xy = np.concatenate([np.array([points[pointIndex][:2] for pointIndex in lines[lineIndex]]) for lineIndex in lineGroup], axis=0)
-    mins = xy.min(0)
-    maxs = xy.max(0)
-    if maxs[0] - mins[0] > maxs[1] - mins[1]:
-      lineDim = 0
+    mins = list(xy.min(0))
+    maxs = list(xy.max(0))
+
+    # for slant lines
+    lineDim = calcLineDim(points, lines[lineGroup[0]])
+    if lineDim == 2:
+      #print_recons(_printRecons, [lines[l] for l in lineGroup])
+      print_recons(_printRecons, 'adjust slant line: ', lineDim, xy, mins, maxs)
+      for p in pointGroup:
+        #print_recons(_printRecons, points[p][:2], points[p]); exit(1)
+        if points[p][:2] == mins or points[p][:2] == maxs: continue
+        points[p][:2] = project_p_toline([points[p][0], points[p][1]], [mins, maxs])
+    elif lineDim == 3:
+      print_recons(_printRecons, 'adjust slant line: ', lineDim, xy, mins, maxs)
+      #print_recons(_printRecons, [lines[l] for l in lineGroup]); print_recons(_printRecons, lineDim, xy, mins, maxs)
+      for p in pointGroup:
+        #print_recons(_printRecons, points[p][:2], points[p]); exit(1)
+        if points[p][0] == mins[0] or points[p][1] == mins[1] or points[p][0] == maxs[0] or points[p][1] == maxs[1]: continue
+        points[p][:2] = project_p_toline([points[p][0], points[p][1]], [[mins[0], maxs[1]], [maxs[0], mins[1]]])
     else:
-      lineDim = 1
-      pass
+      # for Manhattan lines
+      '''
+      if maxs[0] - mins[0] > maxs[1] - mins[1]:
+        lineDim = 0
+      else:
+        lineDim = 1
+        pass
+      '''
+      fixedValue = 0
+      for point in pointGroup:
+        fixedValue += points[point][1 - lineDim]
+        continue
+      fixedValue /= len(pointGroup)
 
-    fixedValue = 0
-    for point in pointGroup:
-      fixedValue += points[point][1 - lineDim]
+      for point in pointGroup:
+        points[point][1 - lineDim] = fixedValue
+        continue
       continue
-    fixedValue /= len(pointGroup)
-
-    for point in pointGroup:
-      points[point][1 - lineDim] = fixedValue
-      continue
-    continue
   return
 
 ## Merge two close points after optimization
@@ -616,12 +672,23 @@ def mergePoints(points, lines):
       if pointDistance(point_1[:2], point_2[:2]) <= DISTANCES['point']:
         orientations = list(POINT_ORIENTATIONS[point_1[2]][point_1[3]] + POINT_ORIENTATIONS[point_2[2]][point_2[3]])
         if len([line for line in lines if pointIndex_1 in line and pointIndex_2 in line]) > 0:
+          '''
           if abs(point_1[0] - point_2[0]) > abs(point_1[1] - point_2[1]):
             orientations.remove(1)
             orientations.remove(3)
           else:
             orientations.remove(0)
             orientations.remove(2)
+          '''
+          lineDim = calcLineDim_(point_1, point_2)
+          if lineDim == 0:
+            orientations = [ori for ori in orientations if ori == 0 or ori == 2]
+          elif lineDim == 1:
+            orientations = [ori for ori in orientations if ori == 1 or ori == 3]
+          elif lineDim == 2:
+            orientations = [ori for ori in orientations if ori == 4 or ori == 6]
+          else:
+            orientations = [ori for ori in orientations if ori == 5 or ori == 7]
             pass
           pass
         orientations = tuple(set(orientations))
@@ -631,7 +698,6 @@ def mergePoints(points, lines):
               lines[lineIndex] = (-1, -1)
               pass
             continue
-
           lineIndices_1 = [(lineIndex, tuple(set(line) - set((pointIndex_1, )))[0]) for lineIndex, line in enumerate(lines) if pointIndex_1 in line and pointIndex_2 not in line]
           lineIndices_2 = [(lineIndex, tuple(set(line) - set((pointIndex_2, )))[0]) for lineIndex, line in enumerate(lines) if pointIndex_2 in line and pointIndex_1 not in line]
           if len(lineIndices_1) == 1 and len(lineIndices_2) == 1:
@@ -661,14 +727,22 @@ def mergePoints(points, lines):
 ## Adjust door corner locations to align with each other after optimization
 def adjustDoorPoints(doorPoints, doorLines, wallPoints, wallLines, doorWallMap):
   for doorLineIndex, doorLine in enumerate(doorLines):
-    lineDim = calcLineDim(doorPoints, doorLine)
+    lineDim = calcLineDim(doorPoints, doorLine, True)
     wallLine = wallLines[doorWallMap[doorLineIndex]]
     wallPoint_1 = wallPoints[wallLine[0]]
     wallPoint_2 = wallPoints[wallLine[1]]
-    fixedValue = (wallPoint_1[1 - lineDim] + wallPoint_2[1 - lineDim]) // 2
-    for endPointIndex in range(2):
-      doorPoints[doorLine[endPointIndex]][1 - lineDim] = fixedValue
-      continue
+
+    if lineDim > 1:
+      dp0, dp1 = doorPoints[doorLine[0]][:2], doorPoints[doorLine[1]][:2]
+      wl = [wallPoint_1[:2], wallPoint_2[:2]]
+      doorPoints[doorLine[0]][:2] = project_p_toline(dp0, wl)
+      doorPoints[doorLine[1]][:2] = project_p_toline(dp1, wl)
+
+    else:
+      fixedValue = (wallPoint_1[1 - lineDim] + wallPoint_2[1 - lineDim]) // 2
+      for endPointIndex in range(2):
+        doorPoints[doorLine[endPointIndex]][1 - lineDim] = fixedValue
+        continue
     continue
 
 ## Generate icon candidates
@@ -677,17 +751,18 @@ def findIconsFromLines(iconPoints, iconLines):
   pointOrientationNeighborsMap = {}
   for line in iconLines:
     lineDim = calcLineDim(iconPoints, line)
+    if lineDim > 1: print_recons(_printRecons, '-*'*10, 697); exit(1)
     for c, pointIndex in enumerate(line):
       if lineDim == 0:
-        if c == 0:
-          orientation = 1
-        else:
-          orientation = 3
-      else:
         if c == 0:
           orientation = 2
         else:
           orientation = 0
+      else:
+        if c == 0:
+          orientation = 1
+        else:
+          orientation = 3
           pass
         pass
 
@@ -739,15 +814,102 @@ def findIconsFromLines(iconPoints, iconLines):
 
 
 ## Find two wall lines facing each other and accumuate semantic information in between
-def findLineNeighbors(points, lines, labelVotesMap, gap):
+def findLineNeighbors(points, lines, labelVotesMap, labelVotesMap1, gap):
   lineNeighbors = [[{}, {}] for lineIndex in range(len(lines))]
   for lineIndex, line in enumerate(lines):
+    #assert all(0 < points[line[i]][j] < 256 for i in range(2) for j in range(2)), print_recons(_printRecons, '-!--' * 20)
     lineDim = calcLineDim(points, line)
     for neighborLineIndex, neighborLine in enumerate(lines):
       if neighborLineIndex <= lineIndex:
         continue
       neighborLineDim = calcLineDim(points, neighborLine)
       if lineDim != neighborLineDim:
+        continue
+
+      if lineDim > 1:
+        lp1 = [points[line[0]][:2], points[line[1]][:2]]
+        lp2 = [points[neighborLine[0]][:2], points[neighborLine[1]][:2]]
+        if lp1[0] == lp2[0] or lp1[0] == lp2[1] or lp1[1] == lp2[0] or lp1[1] == lp2[1]: continue
+
+        p1_to_l2 = [project_p_toline(p, lp2) for p in lp1]
+        p2_to_l1 = [project_p_toline(p, lp1) for p in lp2]
+
+        if p2p(lp1[0], p1_to_l2[0]) < gap: continue
+        if all(pInLine(p, lp2) for p in p1_to_l2):
+          if p2p(lp1[0], lp1[1]) < gap: continue
+          if lineDim == 2:
+            if lp1[0][0] < p1_to_l2[0][0]:
+              region = [lp1[0], lp1[1], p1_to_l2[1], p1_to_l2[0], 0]
+              lineNeighbors[lineIndex][0][neighborLineIndex] = region
+              lineNeighbors[neighborLineIndex][1][lineIndex] = region
+              #print_recons(_printRecons, region, lp1, lp2, lineDim, '------824-----')
+            else:
+              region = [p1_to_l2[0], p1_to_l2[1], lp1[1], lp1[0], 1]
+              lineNeighbors[lineIndex][1][neighborLineIndex] = region
+              lineNeighbors[neighborLineIndex][0][lineIndex] = region
+              #print_recons(_printRecons, region, lp1, lp2, lineDim, '------827-----')
+          else:
+            if lp1[0][0] < p1_to_l2[0][0]:
+              region = [lp1[1], lp1[0], p1_to_l2[0], p1_to_l2[1], 2]
+              lineNeighbors[lineIndex][1][neighborLineIndex] = region
+              lineNeighbors[neighborLineIndex][0][lineIndex] = region
+              #print_recons(_printRecons, region, lp1, lp2, lineDim, '------833-----')
+            else:
+              region = [p1_to_l2[1], p1_to_l2[0], lp1[0], lp1[1], 3]
+              lineNeighbors[lineIndex][0][neighborLineIndex] = region
+              lineNeighbors[neighborLineIndex][1][lineIndex] = region
+              #print_recons(_printRecons, region, lp1, lp2, lineDim, '------838-----')
+
+        elif pInLine(p1_to_l2[0], lp2):
+          if p2p(p1_to_l2[0], lp2[1]) < gap: continue
+          if lineDim == 2:
+            if lp1[0][0] < p1_to_l2[0][0]:
+              region = [lp1[0], p2_to_l1[1], lp2[1], p1_to_l2[0], 4]
+              lineNeighbors[lineIndex][0][neighborLineIndex] = region
+              lineNeighbors[neighborLineIndex][1][lineIndex] = region
+              #print_recons(_printRecons, region, lp1, lp2, lineDim, '------847-----')
+            else:
+              region = [p1_to_l2[0], lp2[1], p2_to_l1[1], lp1[0], 5]
+              lineNeighbors[lineIndex][1][neighborLineIndex] = region
+              lineNeighbors[neighborLineIndex][0][lineIndex] = region
+              #print_recons(_printRecons, region, lp1, lp2, lineDim, '------852-----')
+          else:
+            if lp1[0][0] < p1_to_l2[0][0]:
+              region = [p2_to_l1[1], lp1[0], p1_to_l2[0], lp2[1], 6]
+              lineNeighbors[lineIndex][1][neighborLineIndex] = region
+              lineNeighbors[neighborLineIndex][0][lineIndex] = region
+              #print_recons(_printRecons, region, lp1, lp2, lineDim, '------858-----')
+            else:
+              region = [lp2[1], p1_to_l2[0], lp1[0], p2_to_l1[1], 7]
+              lineNeighbors[lineIndex][0][neighborLineIndex] = region
+              lineNeighbors[neighborLineIndex][1][lineIndex] = region
+              #print_recons(_printRecons, region, lp1, lp2, lineDim, '------863-----')
+
+        elif pInLine(p1_to_l2[1], lp2):
+           if p2p(p1_to_l2[1], lp2[0]) < gap: continue
+           if lineDim == 2:
+             if lp1[1][0] < p1_to_l2[1][0]:
+               region = [p2_to_l1[0], lp1[1], p1_to_l2[1], lp2[0], 8]
+               lineNeighbors[lineIndex][0][neighborLineIndex] = region
+               lineNeighbors[neighborLineIndex][1][lineIndex] = region
+               #print_recons(_printRecons, region, lp1, lp2, lineDim, '------872-----')
+             else:
+               region = [lp2[0], p1_to_l2[1], lp1[1], p2_to_l1[0], 9]
+               lineNeighbors[lineIndex][1][neighborLineIndex] = region
+               lineNeighbors[neighborLineIndex][0][lineIndex] = region
+               #print_recons(_printRecons, region, lp1, lp2, lineDim, '------877-----')
+           else:
+             if lp1[1][0] < p1_to_l2[1][0]:
+               region = [lp1[1], p2_to_l1[0], lp2[0], p1_to_l2[1], 10]
+               lineNeighbors[lineIndex][1][neighborLineIndex] = region
+               lineNeighbors[neighborLineIndex][0][lineIndex] = region
+               #print_recons(_printRecons, region, lp1, lp2, lineDim, '------883-----')
+             else:
+               region = [p1_to_l2[1], lp2[0], p2_to_l1[0], lp1[1], 11]
+               lineNeighbors[lineIndex][0][neighborLineIndex] = region
+               lineNeighbors[neighborLineIndex][1][lineIndex] = region
+               #print_recons(_printRecons, region, lp1, lp2, lineDim, '------888-----')
+
         continue
 
       minValue = max(points[line[0]][lineDim], points[neighborLine[0]][lineDim])
@@ -792,12 +954,40 @@ def findLineNeighbors(points, lines, labelVotesMap, gap):
     hasChange = False
     for lineIndex, neighbors in enumerate(lineNeighbors):
       lineDim = calcLineDim(points, lines[lineIndex])
+      #if lineDim > 1: continue#print_recons(_printRecons, '-*'*10, 915); exit(1)
+      if lineDim == 3:
+        for neighbor_1, region_1 in neighbors[1].items():
+          for neighbor_2, _ in neighbors[0].items():
+            if neighbor_2 not in lineNeighbors[neighbor_1][0]:
+              continue
+            region_2 = lineNeighbors[neighbor_1][0][neighbor_2]
+            r2_p0, r2_p1 = region_2[0], region_2[1]
+            r1_p0, r1_p1 = region_1[0], region_1[1]
+            moved_r2_p1, moved_r2_p0 = move_p_inline(r2_p1, [r2_p1, r2_p0]), move_p_inline(r2_p0, [r2_p0, r2_p1])
+            p_r2_p1, p_r2_p0 = project_p_toline(moved_r2_p1, [r1_p0, r1_p1]), project_p_toline(moved_r2_p0, [r1_p0, r1_p1])
+            if p_r2_p1[0] > r1_p1[0] and p_r2_p0[0] < r1_p0[0]:
+              #print_recons(_printRecons, '-*'*10, 918); exit(1)
+              lineNeighbors[neighbor_1][0].pop(neighbor_2)
+              lineNeighbors[neighbor_2][1].pop(neighbor_1)
+              hasChange = True
+              pass
+            continue
+          continue
+        continue
+
       for neighbor_1, region_1 in neighbors[1].items():
         for neighbor_2, _ in neighbors[0].items():
           if neighbor_2 not in lineNeighbors[neighbor_1][0]:
             continue
           region_2 = lineNeighbors[neighbor_1][0][neighbor_2]
-          if region_1[0][lineDim] < region_2[0][lineDim] + gap and region_1[1][lineDim] > region_2[1][lineDim] - gap:
+
+          if lineDim == 2:
+            r2_p3, r2_p2 = region_2[3], region_2[2]
+            r1_p3, r1_p2 = region_1[3], region_1[2]
+            moved_r2_p3, moved_r2_p2 = move_p_inline(r2_p3, [r2_p3, r2_p2]), move_p_inline(r2_p2, [r2_p2, r2_p3])
+            p_r2_p3, p_r2_p2 = project_p_toline(moved_r2_p3, [r1_p3, r1_p2]), project_p_toline(moved_r2_p2, [r1_p3, r1_p2])
+
+          if (lineDim < 2 and region_1[0][lineDim] < region_2[0][lineDim] + gap and region_1[1][lineDim] > region_2[1][lineDim] - gap) or (lineDim == 2 and p_r2_p3[0] > r1_p3[0] and p_r2_p2[0] < r1_p2[0]):
             lineNeighbors[neighbor_1][0].pop(neighbor_2)
             lineNeighbors[neighbor_2][1].pop(neighbor_1)
             hasChange = True
@@ -810,9 +1000,20 @@ def findLineNeighbors(points, lines, labelVotesMap, gap):
 
 
   for lineIndex, directionNeighbors in enumerate(lineNeighbors):
+    lineDim = calcLineDim(points, lines[lineIndex])
     for direction, neighbors in enumerate(directionNeighbors):
       for neighbor, region in neighbors.items():
-        labelVotes = labelVotesMap[:, region[1][1], region[1][0]] + labelVotesMap[:, region[0][1], region[0][0]] - labelVotesMap[:, region[0][1], region[1][0]] - labelVotesMap[:, region[1][1], region[0][0]]
+        if lineDim > 1:
+          region = np.array(region[:4])
+          rs, cs = polygon(region[:, 1]+1, region[:, 0]+1)
+          rs[rs > 255] = 255
+          cs[cs > 255] = 255
+          labelVotes = np.array([labelVotesMap[i][rs, cs].sum() for i in range(labelVotesMap.shape[0])])
+        else:
+          #labelVotes = labelVotesMap1[:, region[1][1], region[1][0]] + labelVotesMap1[:, region[0][1], region[0][0]] - labelVotesMap1[:, region[0][1], region[1][0]] - labelVotesMap1[:, region[1][1], region[0][0]]
+          region = labelVotesMap[:, region[0][1]+1:region[1][1]+1, region[0][0]+1:region[1][0]+1]
+          labelVotes = np.sum(np.sum(region, axis=1), axis=1)
+
         neighbors[neighbor] = labelVotes
         continue
       continue
@@ -827,6 +1028,9 @@ def findRectangleLineNeighbors(rectanglePoints, rectangles, linePoints, lines, l
   for rectangleIndex, rectangle in enumerate(rectangles):
     for lineIndex, line in enumerate(lines):
       lineDim = calcLineDim(linePoints, line)
+      #if lineDim > 1: print_recons(_printRecons, '-*'*10, 850); exit(1)
+      if lineDim > 1: continue
+      #print_recons(_printRecons, [rectanglePoints[rectangle[i]] for i in range(4)]); exit(1)
 
       minValue = max(rectanglePoints[rectangle[0]][lineDim], rectanglePoints[rectangle[2 - lineDim]][lineDim], linePoints[line[0]][lineDim])
       maxValue = min(rectanglePoints[rectangle[1 + lineDim]][lineDim], rectanglePoints[rectangle[3]][lineDim], linePoints[line[1]][lineDim])
@@ -884,10 +1088,29 @@ def findRectangleLineNeighbors(rectanglePoints, rectangles, linePoints, lines, l
 def findLineMap(points, lines, points_2, lines_2, gap):
   lineMap = [{} for lineIndex in range(len(lines))]
   for lineIndex, line in enumerate(lines):
-    lineDim = calcLineDim(points, line)
+    lineDim = calcLineDim(points, line, True)
     for neighborLineIndex, neighborLine in enumerate(lines_2):
       neighborLineDim = calcLineDim(points_2, neighborLine)
       if lineDim != neighborLineDim:
+        continue
+
+      if lineDim > 1:
+        p0, p1 = points[line[0]][:2], points[line[1]][:2]
+        ln = [points_2[neighborLine[0]][:2], points_2[neighborLine[1]][:2]]
+        #print_recons(_printRecons, p0, p1, ln)
+        if p2line(p0, ln) > gap:
+          continue
+        pp0, pp1 = project_p_toline(p0, ln), project_p_toline(p1, ln)
+        if (pInLine(pp0, ln) and pInLine(pp1, ln)) and p2p(pp0, pp1) >= gap:
+          ratio = 1.0
+        elif (pInLine(pp0, ln) and (not pInLine(pp1, ln))) and p2p(pp0, ln[1]) >= gap:
+          ratio = (p2p(pp0, ln[1]) + 1.0) / (p2p(p0, p1) + 1.0)
+        elif ((not pInLine(pp0, ln)) and pInLine(pp1, ln)) and p2p(pp1, ln[0]) >= gap:
+          ratio = (p2p(pp1, ln[0]) + 1.0) / (p2p(p0, p1) + 1.0)
+        else:
+          continue
+        #print_recons(_printRecons, ratio, '-------------'); exit(1)
+        lineMap[lineIndex][neighborLineIndex] = ratio
         continue
 
       minValue = max(points[line[0]][lineDim], points_2[neighborLine[0]][lineDim])
@@ -897,7 +1120,7 @@ def findLineMap(points, lines, points_2, lines_2, gap):
       fixedValue_1 = (points[line[0]][1 - lineDim] + points[line[1]][1 - lineDim]) // 2
       fixedValue_2 = (points_2[neighborLine[0]][1 - lineDim] + points_2[neighborLine[1]][1 - lineDim]) // 2
 
-      if abs(fixedValue_2 - fixedValue_1) > gap:
+      if abs(fixedValue_2 - fixedValue_1) > gap: #dsc
         continue
 
       lineMinValue = points[line[0]][lineDim]
@@ -915,7 +1138,7 @@ def findLineMap(points, lines, points_2, lines_2, gap):
 def findLineMapSingle(points, lines, points_2, lines_2, gap):
   lineMap = []
   for lineIndex, line in enumerate(lines):
-    lineDim = calcLineDim(points, line)
+    lineDim = calcLineDim(points, line, True)
     minDistance = max(width, height)
     minDistanceLineIndex = -1
     for neighborLineIndex, neighborLine in enumerate(lines_2):
@@ -923,14 +1146,39 @@ def findLineMapSingle(points, lines, points_2, lines_2, gap):
       if lineDim != neighborLineDim:
         continue
 
-      minValue = max(points[line[0]][lineDim], points_2[neighborLine[0]][lineDim])
-      maxValue = min(points[line[1]][lineDim], points_2[neighborLine[1]][lineDim])
-      if maxValue - minValue < gap:
-        continue
-      fixedValue_1 = (points[line[0]][1 - lineDim] + points[line[1]][1 - lineDim]) // 2
-      fixedValue_2 = (points_2[neighborLine[0]][1 - lineDim] + points_2[neighborLine[1]][1 - lineDim]) // 2
+      if lineDim > 1:
+        dp0, dp1 = points[line[0]][:2], points[line[1]][:2]
+        wp0, wp1 = points_2[neighborLine[0]][:2], points_2[neighborLine[1]][:2]
 
-      distance = abs(fixedValue_2 - fixedValue_1)
+        if p2line(dp0, [wp0, wp1]) < gap:
+          continue
+
+        pdp0, pdp1 = project_p_toline(dp0, [wp0, wp1]), project_p_toline(dp1, [wp0, wp1])
+        pwp0, pwp1 = project_p_toline(wp0, [dp0, dp1]), project_p_toline(wp1, [dp0, dp1])
+
+        in_pdp0, in_pdp1 = pInLine(pdp0, [wp0, wp1]), pInLine(pdp1, [wp0, wp1])
+        in_pwp0, in_pwp1 = pInLine(pwp0, [dp0, dp1]), pInLine(pwp1, [dp0, dp1])
+
+        if (in_pdp0 and in_pdp1 and p2p(dp0, dp1) < gap) or (in_pwp0 and in_pwp1 and p2p(wp0, wp1) < gap):
+          continue
+        elif (in_pdp0 and not in_pdp1) and p2p(pdp0, wp1) < gap:
+          continue
+        elif (not in_pdp0 and in_pdp1) and p2p(wp0, pdp1) < gap:
+          continue
+        else:
+          continue
+
+        distance = line2line([dp0, dp1], [wp0, wp1])
+      else:
+        minValue = max(points[line[0]][lineDim], points_2[neighborLine[0]][lineDim])
+        maxValue = min(points[line[1]][lineDim], points_2[neighborLine[1]][lineDim])
+        if maxValue - minValue < gap:
+          continue
+        fixedValue_1 = (points[line[0]][1 - lineDim] + points[line[1]][1 - lineDim]) // 2
+        fixedValue_2 = (points_2[neighborLine[0]][1 - lineDim] + points_2[neighborLine[1]][1 - lineDim]) // 2
+
+        distance = abs(fixedValue_2 - fixedValue_1)
+
       if distance < minDistance:
         minDistance = distance
         minDistanceLineIndex = neighborLineIndex
@@ -939,7 +1187,7 @@ def findLineMapSingle(points, lines, points_2, lines_2, gap):
 
     #if abs(fixedValue_2 - fixedValue_1) > gap:
     #continue
-    #print((lineIndex, minDistance, minDistanceLineIndex))
+    #print_recons(_printRecons, (lineIndex, minDistance, minDistanceLineIndex))
     lineMap.append(minDistanceLineIndex)
     continue
 
@@ -947,12 +1195,14 @@ def findLineMapSingle(points, lines, points_2, lines_2, gap):
 
 
 ## Find conflicting line pairs
-def findConflictLinePairs(points, lines, gap, distanceThreshold, considerEndPoints=False):
+def findConflictLinePairs(points, lines, gap, distanceThreshold, considerEndPoints=False, door=False):
   conflictLinePairs = []
   for lineIndex_1, line_1 in enumerate(lines):
-    lineDim_1 = calcLineDim(points, line_1)
+    lineDim_1 = calcLineDim(points, line_1, door)
     point_1 = points[line_1[0]]
     point_2 = points[line_1[1]]
+    lp_1 = [point_1[:2], point_2[:2]]
+
     fixedValue_1 = int(round((point_1[1 - lineDim_1] + point_2[1 - lineDim_1]) // 2))
     minValue_1 = int(min(point_1[lineDim_1], point_2[lineDim_1]))
     maxValue_1 = int(max(point_1[lineDim_1], point_2[lineDim_1]))
@@ -961,12 +1211,14 @@ def findConflictLinePairs(points, lines, gap, distanceThreshold, considerEndPoin
       if lineIndex_2 <= lineIndex_1:
         continue
 
-      lineDim_2 = calcLineDim(points, line_2)
+      lineDim_2 = calcLineDim(points, line_2, door)
       point_1 = points[line_2[0]]
       point_2 = points[line_2[1]]
+      lp_2 = [point_1[:2], point_2[:2]]
 
       if lineDim_2 == lineDim_1:
         if line_1[0] == line_2[0] or line_1[1] == line_2[1]:
+          #if lineDim_1 < 2: continue
           conflictLinePairs.append((lineIndex_1, lineIndex_2))
           continue
         elif line_1[0] == line_2[1] or line_1[1] == line_2[0]:
@@ -988,20 +1240,26 @@ def findConflictLinePairs(points, lines, gap, distanceThreshold, considerEndPoin
       maxValue_2 = int(max(point_1[lineDim_2], point_2[lineDim_2]))
 
       if lineDim_1 == lineDim_2:
-        if abs(fixedValue_2 - fixedValue_1) >= distanceThreshold or minValue_1 > maxValue_2 - gap or minValue_2 > maxValue_1 - gap:
-          continue
+        if lineDim_1 < 2 and (abs(fixedValue_2 - fixedValue_1) >= distanceThreshold or minValue_1 > maxValue_2 - gap or minValue_2 > maxValue_1 - gap): continue
 
+        moved_p1, moved_p2 = move_p_inline(lp_1[0], lp_1, gap), move_p_inline(lp_2[0], lp_2, gap)
+        if lineDim_1 == 2 and (line2line(lp_1, lp_2) >= distanceThreshold or (moved_p1[0] > lp_2[1][0] and moved_p1[1] > lp_2[1][1]) or (moved_p2[0] > lp_1[1][0] and moved_p2[1] > lp_1[1][1])): continue
+        if lineDim_1 == 3 and (line2line(lp_1, lp_2) >= distanceThreshold or (moved_p1[0] > lp_2[1][0] and moved_p1[1] < lp_2[1][1]) or (moved_p2[0] > lp_1[1][0] and moved_p2[1] < lp_1[1][1])): continue
+
+        if lineDim_1 < 2: continue
         conflictLinePairs.append((lineIndex_1, lineIndex_2))
-        #drawLines(output_prefix + 'lines_' + str(lineIndex_1) + "_" + str(lineIndex_2) + '.png', width, height, points, [line_1, line_2])
       else:
-        if minValue_1 > fixedValue_2 - gap or maxValue_1 < fixedValue_2 + gap or minValue_2 > fixedValue_1 - gap or maxValue_2 < fixedValue_1 + gap:
-          continue
+        if lineDim_1 < 2 and lineDim_2 < 2 and (minValue_1 > fixedValue_2 - gap or maxValue_1 < fixedValue_2 + gap or minValue_2 > fixedValue_1 - gap or maxValue_2 < fixedValue_1 + gap): continue
 
+        #p = interLine(lp_1, lp_2)
+        #if any((not pInLine(p, l)) for l in [lp_1, lp_2]): continue
+        #if any(p2p(p, lp) < gap for l in [lp_1, lp_2] for lp in l): continue
+        if lineDim_1 > 1 or lineDim_2 > 1: continue
         conflictLinePairs.append((lineIndex_1, lineIndex_2))
         pass
       continue
     continue
-
+  #return []
   return conflictLinePairs
 
 
@@ -1045,6 +1303,8 @@ def findConflictRectangleLinePairs(rectanglePoints, rectangles, linePoints, line
   for rectangleIndex, rectangle in enumerate(rectangles):
     for lineIndex, line in enumerate(lines):
       lineDim = calcLineDim(linePoints, line)
+      #if lineDim > 1: print_recons(_printRecons, '-*'*10, 1073); exit(1)
+      if lineDim > 1: continue
       if lineDim == 0:
         minX = max(rectanglePoints[rectangle[0]][0], rectanglePoints[rectangle[2]][0], linePoints[line[0]][0])
         maxX = min(rectanglePoints[rectangle[1]][0], rectanglePoints[rectangle[3]][0], linePoints[line[1]][0])
@@ -1075,7 +1335,16 @@ def findConflictRectangleLinePairs(rectanglePoints, rectangles, linePoints, line
 def findLinePointMap(points, lines, points_2, gap):
   lineMap = [[] for lineIndex in range(len(lines))]
   for lineIndex, line in enumerate(lines):
-    lineDim = calcLineDim(points, line)
+    lineDim = calcLineDim(points, line, True)
+    if lineDim > 1:
+      dp0, dp1 = points[line[0]], points[line[1]]
+      l = [dp0, dp1]
+      for neighborPointIndex, neighborPoint in enumerate(points_2):
+        if p2line(neighborPoint, l) > gap: continue
+        pnp = project_p_toline(neighborPoint, l)
+        if not (pInLine(pnp, l) and p2p(pnp, dp0) >= gap and p2p(pnp, dp1) >= gap): continue
+      lineMap[lineIndex].append(neighborPointIndex)
+      continue
     fixedValue = (points[line[0]][1 - lineDim] + points[line[1]][1 - lineDim]) // 2
     for neighborPointIndex, neighborPoint in enumerate(points_2):
       if neighborPoint[lineDim] < points[line[0]][lineDim] + gap or neighborPoint[lineDim] > points[line[1]][lineDim] - gap:
@@ -1200,22 +1469,35 @@ def findCandidatesFromHeatmaps(iconHeatmaps, iconPointOffset, doorPointOffset):
   return newIcons, newIconPoints, newDoorLines, newDoorPoints
 
 ## Sort lines so that the first point always has smaller x or y
-def sortLines(points, lines):
+def sortLines(points, lines, door=False):
   for lineIndex, line in enumerate(lines):
-    lineDim = calcLineDim(points, line)
-    if points[line[0]][lineDim] > points[line[1]][lineDim]:
-      lines[lineIndex] = (line[1], line[0])
-      pass
-    continue
+    lineDim = calcLineDim(points, line, door)
+    #if lineDim > 1: print_recons(_printRecons, '-*'*10, 1233); exit(1)
+    if lineDim < 2:
+      if points[line[0]][lineDim] > points[line[1]][lineDim]:
+        lines[lineIndex] = (line[1], line[0])
+    elif lineDim == 2:
+      if not (points[line[0]][0] < points[line[1]][0] and points[line[0]][1] < points[line[1]][1]):
+        lines[lineIndex] = (line[1], line[0])
+    else:
+      if not (points[line[0]][0] < points[line[1]][0] and points[line[0]][1] > points[line[1]][1]):
+        lines[lineIndex] = (line[1], line[0])
+
+# print reconstruction
+def print_recons(*args):
+  if args[0]:
+    print(*args[1:])
 
 ## Reconstruct a floorplan via IP optimization
-def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatmaps, iconHeatmaps, roomHeatmaps, output_prefix='test/', densityImage=None, gt_dict=None, gt=False, gap=-1, distanceThreshold=-1, lengthThreshold=-1, debug_prefix='test', heatmapValueThresholdWall=None, heatmapValueThresholdDoor=None, heatmapValueThresholdIcon=None, enableAugmentation=False):
-  print('reconstruct')
+def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatmaps, iconHeatmaps, roomHeatmaps, output_prefix='test/', densityImage=None, gt_dict=None, gt=False, gap=-1, distanceThreshold=-1, lengthThreshold=-1, debug_prefix='test', heatmapValueThresholdWall=None, heatmapValueThresholdDoor=None, heatmapValueThresholdIcon=None, enableAugmentation=False, printRecons=False, options=None):
+
+  _printRecons = printRecons
+  print_recons(_printRecons, 'reconstruct')
 
   wallPoints = []
   iconPoints = []
   doorPoints = []
-  
+
   numWallPoints = 100
   numDoorPoints = 100
   numIconPoints = 100
@@ -1224,7 +1506,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     pass
   heatmapValueThresholdDoor = 0.5
   heatmapValueThresholdIcon = 0.5
-
+  gap = 5
   if gap > 0:
     for k in GAPS:
       GAPS[k] = gap
@@ -1244,21 +1526,20 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
   wallPoints, wallLines, wallPointOrientationLinesMap, wallPointNeighbors, augmentedPointMask = extractCorners(wallCornerHeatmaps, heatmapValueThresholdWall, gap=GAPS['wall_extraction'], augment=enableAugmentation, gt=gt)
   doorPoints, doorLines, doorPointOrientationLinesMap, doorPointNeighbors, _ = extractCorners(doorCornerHeatmaps, heatmapValueThresholdDoor, gap=GAPS['door_extraction'], cornerType='door', gt=gt)
   iconPoints, iconLines, iconPointOrientationLinesMap, iconPointNeighbors, _ = extractCorners(iconCornerHeatmaps, heatmapValueThresholdIcon, gap=GAPS['icon_extraction'], cornerType='icon', gt=gt)
-
   if not gt:
     for pointIndex, point in enumerate(wallPoints):
-      #print((pointIndex, np.array(point[:2]).astype(np.int32).tolist(), point[2], point[3]))
+      #print_recons(_printRecons, (pointIndex, np.array(point[:2]).astype(np.int32).tolist(), point[2], point[3]))
       continue
 
     wallPoints, wallLines, wallPointOrientationLinesMap, wallPointNeighbors = filterWalls(wallPoints, wallLines)
     pass
 
 
-  sortLines(doorPoints, doorLines)
+  sortLines(doorPoints, doorLines, True)
   sortLines(wallPoints, wallLines)
 
-  print('the number of points', len(wallPoints), len(doorPoints), len(iconPoints))
-  print('the number of lines', len(wallLines), len(doorLines), len(iconLines))
+  print_recons(_printRecons, 'the number of points', len(wallPoints), len(doorPoints), len(iconPoints))
+  print_recons(_printRecons, 'the number of lines', len(wallLines), len(doorLines), len(iconLines))
 
 
   drawPoints(os.path.join(debug_prefix, "points.png"), width, height, wallPoints, densityImage, pointSize=3)
@@ -1268,16 +1549,19 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
   wallMask = drawLineMask(width, height, wallPoints, wallLines)
 
   labelVotesMap = np.zeros((NUM_ROOMS, height, width))
+  labelVotesMap1 = np.zeros((NUM_ROOMS, height, width))
   #labelMap = np.zeros((NUM_LABELS, height, width))
   #semanticHeatmaps = np.concatenate([iconHeatmaps, roomHeatmaps], axis=2)
+  #print_recons(_printRecons, roomHeatmaps.shape); exit(1)
   for segmentIndex in range(NUM_ROOMS):
     segmentation_img = roomHeatmaps[:, :, segmentIndex]
     #segmentation_img = (segmentation_img > 0.5).astype(np.float)
     labelVotesMap[segmentIndex] = segmentation_img
+    labelVotesMap1[segmentIndex] = segmentation_img
     #labelMap[segmentIndex] = segmentation_img
     continue
 
-  labelVotesMap = np.cumsum(np.cumsum(labelVotesMap, axis=1), axis=2)
+  labelVotesMap1 = np.cumsum(np.cumsum(labelVotesMap1, axis=1), axis=2)
 
   icons = findIconsFromLines(iconPoints, iconLines)
 
@@ -1294,11 +1578,10 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     drawLines(os.path.join(debug_prefix, 'lines.png'), width, height, wallPoints, wallLines, [], None, 2, lineColor=255)
     drawLines(os.path.join(debug_prefix, 'doors.png'), width, height, doorPoints, doorLines, [], None, 2, lineColor=255)
     drawRectangles(os.path.join(debug_prefix, 'icons.png'), width, height, iconPoints, icons, {}, 2)
-    print('number of walls: ' + str(len(wallLines)))
-    print('number of doors: ' + str(len(doorLines)))
-    print('number of icons: ' + str(len(icons)))
+    print_recons(_printRecons, 'number of walls: ' + str(len(wallLines)))
+    print_recons(_printRecons, 'number of doors: ' + str(len(doorLines)))
+    print_recons(_printRecons, 'number of icons: ' + str(len(icons)))
     pass
-
 
   doorWallLineMap = findLineMap(doorPoints, doorLines, wallPoints, wallLines, gap=GAPS['wall_door_neighbor'])
 
@@ -1314,13 +1597,13 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
   doorWallLineMap = newDoorWallLineMap
 
 
-  conflictWallLinePairs = findConflictLinePairs(wallPoints, wallLines, gap=GAPS['wall_conflict'], distanceThreshold=DISTANCES['wall'], considerEndPoints=True)
+  conflictWallLinePairs = findConflictLinePairs(wallPoints, wallLines, gap=GAPS['wall_conflict'], distanceThreshold=DISTANCES['wall'], considerEndPoints=False)
 
-  conflictDoorLinePairs = findConflictLinePairs(doorPoints, doorLines, gap=GAPS['door_conflict'], distanceThreshold=DISTANCES['door'])
+  conflictDoorLinePairs = findConflictLinePairs(doorPoints, doorLines, gap=GAPS['door_conflict'], distanceThreshold=DISTANCES['door'], door=True)
   conflictIconPairs = findConflictRectanglePairs(iconPoints, icons, gap=GAPS['icon_conflict'])
 
   if False:
-    print(wallLines)
+    print_recons(_printRecons, wallLines)
     os.system('mkdir ' + debug_prefix + '/lines')
     for lineIndex, line in enumerate(wallLines):
       drawLines(os.path.join(debug_prefix, 'lines/line_' + str(lineIndex) + '.png'), width, height, wallPoints, [line], [], lineColor=255)
@@ -1329,19 +1612,19 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     pass
 
 
-  wallLineNeighbors = findLineNeighbors(wallPoints, wallLines, labelVotesMap, gap=GAPS['wall_neighbor'])
+  wallLineNeighbors = findLineNeighbors(wallPoints, wallLines, labelVotesMap, labelVotesMap1, gap=GAPS['wall_neighbor'])
 
   iconWallLineNeighbors = findRectangleLineNeighbors(iconPoints, icons, wallPoints, wallLines, wallLineNeighbors, gap=GAPS['wall_icon_neighbor'], distanceThreshold=DISTANCES['wall_icon'])
   conflictIconWallPairs = findConflictRectangleLinePairs(iconPoints, icons, wallPoints, wallLines, gap=GAPS['wall_icon_conflict'])
 
 
   if False:
-    print(conflictWallLinePairs)
+    print_recons(_printRecons, conflictWallLinePairs)
     for wallIndex in [0, 17]:
-      print(wallLines[wallIndex])
-      print([wallPoints[pointIndex] for pointIndex in wallLines[wallIndex]])
-      print(wallPointOrientationLinesMap[wallLines[wallIndex][0]])
-      print(wallPointOrientationLinesMap[wallLines[wallIndex][1]])
+      print_recons(_printRecons, wallLines[wallIndex])
+      print_recons(_printRecons, [wallPoints[pointIndex] for pointIndex in wallLines[wallIndex]])
+      print_recons(_printRecons, wallPointOrientationLinesMap[wallLines[wallIndex][0]])
+      print_recons(_printRecons, wallPointOrientationLinesMap[wallLines[wallIndex][1]])
       continue
     exit(1)
     pass
@@ -1355,13 +1638,13 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
       exteriorLines[lineIndex] = 1
       pass
     continue
-  #print(exteriorLines)
+  #print_recons(_printRecons, exteriorLines)
 
   if False:
     filteredWallLines = []
     for lineIndex, neighbors in enumerate(wallLineNeighbors):
       if len(neighbors[0]) == 0 and len(neighbors[1]) > 0:
-        print(lineIndex)
+        print_recons(_printRecons, lineIndex)
         filteredWallLines.append(wallLines[lineIndex])
         pass
       continue
@@ -1370,7 +1653,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     filteredWallLines = []
     for lineIndex, neighbors in enumerate(wallLineNeighbors):
       if len(neighbors[0]) > 0 and len(neighbors[1]) == 0:
-        print(lineIndex)
+        print_recons(_printRecons, lineIndex)
         filteredWallLines.append(wallLines[lineIndex])
         pass
       continue
@@ -1398,7 +1681,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     l_dir_labels = []
     for lineIndex in range(len(wallLines)):
       dir_labels = []
-      for direction in range(2):
+      for direction in range(4):
         labels = []
         for label in range(NUM_ROOMS):
           labels.append(LpVariable(cat=LpBinary, name="line_" + str(lineIndex) + "_" + str(direction) + "_" + str(label)))
@@ -1410,7 +1693,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     #model.update()
     #obj = QuadExpr()
     obj = LpAffineExpression()
-    
+
     if gt:
       for pointIndex in range(len(wallPoints)):
         model += (w_p[pointIndex] == 1, 'gt_point_active_' + str(pointIndex))
@@ -1434,10 +1717,9 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
         model += (iconSum == 1)
         continue
       pass
-
     ## Semantic label one hot constraints
     for lineIndex in range(len(wallLines)):
-      for direction in range(2):
+      for direction in range(2): # dsc
         labelSum = LpAffineExpression()
         for label in range(NUM_ROOMS):
           labelSum += l_dir_labels[lineIndex][direction][label]
@@ -1459,7 +1741,8 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
         continue
       pass
 
-    ## Loop constraints
+    ## Loop constraints # dsc
+    '''
     closeRooms = {}
     for label in range(NUM_ROOMS):
       closeRooms[label] = True
@@ -1469,22 +1752,24 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     #closeRooms[3] = False
     closeRooms[8] = False
     closeRooms[9] = False
-
     for label in range(NUM_ROOMS):
       if not closeRooms[label]:
         continue
       for pointIndex, orientationLinesMap in enumerate(wallPointOrientationLinesMap):
+        #print_recons(_printRecons, orientationLinesMap); exit(1)
         for orientation, lines in orientationLinesMap.items():
-          direction = int(orientation in [1, 2])
+          #print_recons(_printRecons, 'orientation: ', orientation)
+          direction = int(orientation in [1, 2, 6, 7])
           lineSum = LpAffineExpression()
           for lineIndex in lines:
             lineSum += l_dir_labels[lineIndex][direction][label]
             continue
-          for nextOrientation in range(orientation + 1, 8):
-            if not (nextOrientation % 4) in orientationLinesMap:
+          for nextOrientation in range(orientation + 1, 16):
+            #if (not (nextOrientation % 8) in orientationLinesMap) or ((nextOrientation % 8) == orientation):
+            if not (nextOrientation % 8) in orientationLinesMap:
               continue
-            nextLines = orientationLinesMap[nextOrientation % 4]
-            nextDirection = int((nextOrientation % 4) in [0, 3])
+            nextLines = orientationLinesMap[nextOrientation%8]
+            nextDirection = int(nextOrientation % 8 in [0, 3, 4, 5])
             nextLineSum = LpAffineExpression()
             for nextLineIndex in nextLines:
               nextLineSum += l_dir_labels[nextLineIndex][nextDirection][label]
@@ -1494,7 +1779,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
           continue
         continue
       continue
-
+    '''
 
     ## Exterior constraints
     exteriorLineSum = LpAffineExpression()
@@ -1514,6 +1799,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
       for direction, neighbors in enumerate(directionNeighbors):
         labelVotesSum = np.zeros(NUM_ROOMS)
         for neighbor, labelVotes in neighbors.items():
+          #print_recons(_printRecons, neighbor, labelVotes); exit(1)
           labelVotesSum += labelVotes
           continue
 
@@ -1531,7 +1817,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     ## Icon corner constraints (one icon corner belongs to at most one icon)
     pointIconsMap = {}
     for iconIndex, icon in enumerate(icons):
-      for cornerIndex in range(4):
+      for cornerIndex in range(2): # dsc
         pointIndex = icon[cornerIndex]
         if pointIndex not in pointIconsMap:
           pointIconsMap[pointIndex] = []
@@ -1556,18 +1842,27 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
       point_1 = np.array(wallPoints[line[0]][:2])
       point_2 = np.array(wallPoints[line[1]][:2])
       lineDim = calcLineDim(wallPoints, line)
+      #if lineDim > 1: print_recons(_printRecons, '-*'*10, 1587); exit(1)
 
-      fixedValue = int(round((point_1[1 - lineDim] + point_2[1 - lineDim]) // 2))
-      point_1[lineDim], point_2[lineDim] = min(point_1[lineDim], point_2[lineDim]), max(point_1[lineDim], point_2[lineDim])
+      if lineDim > 1:
+        rs, cs = poly_sline(point_1, point_2, wallLineWidth, sizes[1], sizes[0])
+        img = np.zeros_like(wallLineConfidenceMap)
+        img[rs, cs] = 1
+        wallLineConfidence = np.sum(wallLineConfidenceMap[img == 1]) / np.sum(img) - 0.5
+        #print_recons(_printRecons, wallLineConfidence, lineDim); exit(1)
+      else:
+        fixedValue = int(round((point_1[1 - lineDim] + point_2[1 - lineDim]) // 2))
+        point_1[lineDim], point_2[lineDim] = min(point_1[lineDim], point_2[lineDim]), max(point_1[lineDim], point_2[lineDim])
 
-      point_1[1 - lineDim] = fixedValue - wallLineWidth
-      point_2[1 - lineDim] = fixedValue + wallLineWidth
+        point_1[1 - lineDim] = fixedValue - wallLineWidth
+        point_2[1 - lineDim] = fixedValue + wallLineWidth
+        point_1 = np.maximum(point_1, 0).astype(np.int32)
+        point_2 = np.minimum(point_2, sizes - 1).astype(np.int32)
 
-      point_1 = np.maximum(point_1, 0).astype(np.int32)
-      point_2 = np.minimum(point_2, sizes - 1).astype(np.int32)
-
-      wallLineConfidence = np.sum(wallLineConfidenceMap[point_1[1]:point_2[1] + 1, point_1[0]:point_2[0] + 1]) / ((point_2[1] + 1 - point_1[1]) * (point_2[0] + 1 - point_1[0])) - 0.5
-
+        wallLineConfidence = np.sum(wallLineConfidenceMap[point_1[1]:point_2[1] + 1, point_1[0]:point_2[0] + 1]) / ((point_2[1] + 1 - point_1[1]) * (point_2[0] + 1 - point_1[0])) - 0.5 # todo
+        #print_recons(_printRecons, wallLineConfidence, lineDim)
+     
+      #print(f'-------------------->{wallLineConfidence}<--------------------')
       obj += (-wallLineConfidence * w_l[lineIndex] * wallWeight)
 
       wallConfidences.append(wallLineConfidence)
@@ -1575,7 +1870,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
 
     if not gt:
       for wallIndex, wallLine in enumerate(wallLines):
-        #print('wall confidence', wallIndex, [np.array(wallPoints[pointIndex][:2]).astype(np.int32).tolist() for pointIndex in wallLine], wallConfidences[wallIndex])
+        #print_recons(_printRecons, 'wall confidence', wallIndex, [np.array(wallPoints[pointIndex][:2]).astype(np.int32).tolist() for pointIndex in wallLine], wallConfidences[wallIndex])
         continue
       pass
 
@@ -1588,8 +1883,21 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     for lineIndex, line in enumerate(doorLines):
       point_1 = np.array(doorPoints[line[0]][:2])
       point_2 = np.array(doorPoints[line[1]][:2])
-      lineDim = calcLineDim(doorPoints, line)
-
+      lineDim = calcLineDim(doorPoints, line, True)
+      if lineDim > 1: 
+        #continue # dsc
+        if not gt:
+          ps = rec_points_sline(point_1, point_2, doorLineWidth, height, width)
+          rs, cs = polygon(ps[:, 1], ps[:, 0])
+          img = np.zeros_like(doorLineConfidenceMap)
+          img[rs, cs] = 1
+          doorLineConfidence = np.sum(doorLineConfidenceMap[img == 1]) / np.sum(img)
+          doorPointConfidence = sum(doorCornerHeatmaps[ps[i][1], ps[i][0], 3 - i] for i in range(4)) / 4
+          doorConfidence = (doorLineConfidence + doorPointConfidence) * 0.5 - options.thres_door
+          obj += (-doorConfidence * d_l[lineIndex] * doorWeight)
+        else:
+          obj += (-0.5 * d_l[lineIndex] * doorWeight)
+        continue
       fixedValue = int(round((point_1[1 - lineDim] + point_2[1 - lineDim]) // 2))
 
       #assert(point_1[lineDim] < point_2[lineDim], 'door line reversed')
@@ -1609,15 +1917,17 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
         else:
           doorPointConfidence = (doorCornerHeatmaps[point_1[1], point_1[0], 0] + doorCornerHeatmaps[point_2[1], point_2[0], 2]) / 2
           pass
-        doorConfidence = (doorLineConfidence + doorPointConfidence) * 0.5 - 0.5
-        #print('door confidence', doorConfidence)
+        doorConfidence = (doorLineConfidence + doorPointConfidence) * 0.5 - options.thres_door
+        #print_recons(_printRecons, 'door confidence', doorConfidence)
+        print(f'door output threshold is {options.thres_door}')
+        print(f'-------------------->{doorLineConfidence}, {doorPointConfidence}<--------------------')
         obj += (-doorConfidence * d_l[lineIndex] * doorWeight)
       else:
         obj += (-0.5 * d_l[lineIndex] * doorWeight)
         pass
       continue
 
-    ## Icon confidence objective  
+    ## Icon confidence objective
     for iconIndex, icon in enumerate(icons):
       point_1 = iconPoints[icon[0]]
       point_2 = iconPoints[icon[1]]
@@ -1632,9 +1942,9 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
       iconArea = (x_2 - x_1 + 1) * (y_2 - y_1 + 1)
 
       if iconArea <= 1e-4:
-        print(icon)
-        print([iconPoints[pointIndex] for pointIndex in icon])
-        print('zero size icon')
+        print_recons(_printRecons, icon)
+        print_recons(_printRecons, [iconPoints[pointIndex] for pointIndex in icon])
+        print_recons(_printRecons, 'zero size icon')
         exit(1)
         pass
 
@@ -1648,7 +1958,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
         iconConfidence = iconTypeConfidence
         pass
 
-      #print('icon confidence', iconConfidence)
+      #print_recons(_printRecons, 'icon confidence', iconConfidence)
       for typeIndex in range(NUM_ICONS):
         obj += (-i_types[iconIndex][typeIndex] * (iconConfidence[typeIndex]) * iconTypeWeight)
         continue
@@ -1668,7 +1978,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     for pointIndex, orientationLinesMap in enumerate(wallPointOrientationLinesMap):
       for orientation, lines in orientationLinesMap.items():
         #if len(lines) > 1:
-        #print(lines)
+        #print_recons(_printRecons, lines)
         lineSum = LpAffineExpression()
         for lineIndex in lines:
           lineSum += w_l[lineIndex]
@@ -1726,16 +2036,17 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
     model.solve()
 
     #model.writeLP(debug_prefix + '/model.lp')
-    print('Optimization information', LpStatus[model.status], value(model.objective))
+    print_recons(_printRecons, 'Optimization information', LpStatus[model.status], value(model.objective))
 
     if LpStatus[model.status] == 'Optimal':
       filteredWallLines = []
       filteredWallLabels = []
       filteredWallTypes = []
-      wallPointLabels = [[-1, -1, -1, -1] for pointIndex in range(len(wallPoints))]
+      wallPointLabels = [[-1, -1, -1, -1, -1, -1, -1, -1] for pointIndex in range(len(wallPoints))]
 
       for lineIndex, lineVar in enumerate(w_l):
-        if lineVar.varValue < 0.5:
+        #print_recons(_printRecons, lineVar.varValue)
+        if lineVar.varValue < 0.5: # wall_thres
           continue
         filteredWallLines.append(wallLines[lineIndex])
 
@@ -1751,19 +2062,53 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
           continue
 
         filteredWallLabels.append(labels)
-        print('wall', lineIndex, labels, [np.array(wallPoints[pointIndex][:2]).astype(np.int32).tolist() for pointIndex in wallLines[lineIndex]], wallLineNeighbors[lineIndex][0].keys(), wallLineNeighbors[lineIndex][1].keys())
+        print_recons(_printRecons, 'wall', lineIndex, labels, [np.array(wallPoints[pointIndex][:2]).astype(np.int32).tolist() for pointIndex in wallLines[lineIndex]], wallLineNeighbors[lineIndex][0].keys(), wallLineNeighbors[lineIndex][1].keys())
         line = wallLines[lineIndex]
         lineDim = calcLineDim(wallPoints, line)
+        i = 2
+        m = {0: [1, 1], 1: [1, 0], 2: [0, 0], 3: [0, 1]}
         if lineDim == 0:
           wallPointLabels[line[0]][0] = labels[0]
-          wallPointLabels[line[0]][1] = labels[1]
-          wallPointLabels[line[1]][3] = labels[0]
-          wallPointLabels[line[1]][2] = labels[1]
-        else:
           wallPointLabels[line[0]][1] = labels[0]
           wallPointLabels[line[0]][2] = labels[1]
+          wallPointLabels[line[0]][3] = labels[1]
+
+          wallPointLabels[line[1]][7] = labels[0]
+          wallPointLabels[line[1]][6] = labels[0]
+          wallPointLabels[line[1]][5] = labels[1]
+          wallPointLabels[line[1]][4] = labels[1]
+        elif lineDim == 1:
+          wallPointLabels[line[0]][2] = labels[0]
+          wallPointLabels[line[0]][3] = labels[0]
+          wallPointLabels[line[0]][4] = labels[1]
+          wallPointLabels[line[0]][5] = labels[1]
+
+          wallPointLabels[line[1]][1] = labels[0]
           wallPointLabels[line[1]][0] = labels[0]
-          wallPointLabels[line[1]][3] = labels[1]
+          wallPointLabels[line[1]][7] = labels[1]
+          wallPointLabels[line[1]][6] = labels[1]
+        elif lineDim == 2:
+          #print_recons(_printRecons, wallPoints[line[0]], wallPoints[line[1]], ' dim=2')
+          wallPointLabels[line[0]][1] = labels[m[i][0]]
+          wallPointLabels[line[0]][2] = labels[m[i][0]]
+          wallPointLabels[line[0]][3] = labels[1 - m[i][0]]
+          wallPointLabels[line[0]][4] = labels[1 - m[i][0]]
+
+          wallPointLabels[line[1]][0] = labels[m[i][0]]
+          wallPointLabels[line[1]][7] = labels[m[i][0]]
+          wallPointLabels[line[1]][6] = labels[1 - m[i][0]]
+          wallPointLabels[line[1]][5] = labels[1 - m[i][0]]
+        else:
+          #print_recons(_printRecons, wallPoints[line[0]], wallPoints[line[1]], ' dim=3')
+          wallPointLabels[line[0]][7] = labels[m[i][1]]
+          wallPointLabels[line[0]][0] = labels[m[i][1]]
+          wallPointLabels[line[0]][1] = labels[1 - m[i][1]]
+          wallPointLabels[line[0]][2] = labels[1 - m[i][1]]
+
+          wallPointLabels[line[1]][6] = labels[m[i][1]]
+          wallPointLabels[line[1]][5] = labels[m[i][1]]
+          wallPointLabels[line[1]][4] = labels[1 - m[i][1]]
+          wallPointLabels[line[1]][3] = labels[1 - m[i][1]]
           pass
         continue
 
@@ -1774,22 +2119,22 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
         filteredWallLabels = [filteredWallLabels[lineIndex] for lineIndex in range(len(filteredWallLines)) if filteredWallLines[lineIndex][0] != filteredWallLines[lineIndex][1]]
         filteredWallLines = [line for line in filteredWallLines if line[0] != line[1]]
         pass
-
-
+      print_recons(_printRecons, '----------number of filteredWallLines: ', len(filteredWallLines))
       drawLines(output_prefix + 'result_line.png', width, height, wallPoints, filteredWallLines, filteredWallLabels, lineColor=255)
       #resultImage = drawLines('', width, height, wallPoints, filteredWallLines, filteredWallLabels, None, lineWidth=5, lineColor=255)
 
       filteredDoorLines = []
       filteredDoorTypes = []
       for lineIndex, lineVar in enumerate(d_l):
-        if lineVar.varValue < 0.5:
+        if lineVar.varValue < 0.5: # door_t # dsc
           continue
-        print(('door', lineIndex, [doorPoints[pointIndex][:2] for pointIndex in doorLines[lineIndex]]))
+        print_recons(_printRecons, ('door', lineIndex, [doorPoints[pointIndex][:2] for pointIndex in doorLines[lineIndex]]))
         filteredDoorLines.append(doorLines[lineIndex])
 
         filteredDoorTypes.append(0)
         continue
-
+      print('dsc'*20, len(filteredDoorLines))
+      print_recons(_printRecons, '-------------number of filteredDoorLines:', len(filteredDoorLines))
       filteredDoorWallMap = findLineMapSingle(doorPoints, filteredDoorLines, wallPoints, filteredWallLines, gap=GAPS['wall_door_neighbor'])
       adjustDoorPoints(doorPoints, filteredDoorLines, wallPoints, filteredWallLines, filteredDoorWallMap)
       drawLines(output_prefix + 'result_door.png', width, height, doorPoints, filteredDoorLines, lineColor=255)
@@ -1808,7 +2153,7 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
             break
           continue
 
-        print(('icon', iconIndex, iconType, [iconPoints[pointIndex][:2] for pointIndex in icons[iconIndex]]))
+        print_recons(_printRecons, ('icon', iconIndex, iconType, [iconPoints[pointIndex][:2] for pointIndex in icons[iconIndex]]))
 
         filteredIconTypes.append(iconType)
         continue
@@ -1844,17 +2189,17 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
         if len(orientations) == 0:
           continue
 
-        #print((pointIndex, orientationLines))
+        #print_recons(_printRecons, (pointIndex, orientationLines))
 
         if len(orientations) < len(wallPointOrientationLinesMap[pointIndex]):
-          print('invalid point', pointIndex, orientations, wallPointOrientationLinesMap[pointIndex])
-          print(wallPoints[pointIndex])
+          print_recons(_printRecons, 'invalid point', pointIndex, orientations, wallPointOrientationLinesMap[pointIndex])
+          print_recons(_printRecons, wallPoints[pointIndex])
           wallPoints[pointIndex][2] = len(orientations) - 1
           orientations = tuple(orientations)
           if orientations not in orientationMap:
             continue
           wallPoints[pointIndex][3] = orientationMap[orientations]
-          print(wallPoints[pointIndex])
+          print_recons(_printRecons, wallPoints[pointIndex])
           exit(1)
           pass
 
@@ -1903,30 +2248,29 @@ def reconstructFloorplan(wallCornerHeatmaps, doorCornerHeatmaps, iconCornerHeatm
 
         result_file.close()
 
+      writePoints(filteredWallPoints, filteredWallPointLabels, output_prefix=output_prefix)
 
-      # writePoints(filteredWallPoints, filteredWallPointLabels, output_prefix=output_prefix)
-        
-      # if len(filteredDoorLines) > 0:
-      #   writeDoors(doorPoints, filteredDoorLines, filteredDoorTypes, output_prefix=output_prefix)
-      #   pass
-      # else:
-      #   try:
-      #     os.remove(output_prefix + 'doors_out.txt')
-      #   except OSError:
-      #     pass
+      if len(filteredDoorLines) > 0:
+        writeDoors(doorPoints, filteredDoorLines, filteredDoorTypes, output_prefix=output_prefix)
+        pass
+      else:
+        try:
+          os.remove(output_prefix + 'doors_out.txt')
+        except OSError:
+          pass
 
-      # if len(filteredIcons) > 0:
-      #   writeIcons(iconPoints, filteredIcons, filteredIconTypes, output_prefix=output_prefix)
-      #   pass
-      # else:
-      #   try:
-      #     os.remove(output_prefix + 'icons_out.txt')
-      #   except OSError:
-      #     pass
-      #   pass
+      if len(filteredIcons) > 0:
+        writeIcons(iconPoints, filteredIcons, filteredIconTypes, output_prefix=output_prefix)
+        pass
+      else:
+        try:
+          os.remove(output_prefix + 'icons_out.txt')
+        except OSError:
+          pass
+        pass
 
     else:
-      print('infeasible')
+      print_recons(_printRecons, 'infeasible')
       #model.ComputeIIS()
       #model.write("test/model.ilp")
       return {}
