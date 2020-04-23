@@ -3,67 +3,15 @@ from torch.utils.data import Dataset
 import numpy as np
 import time
 
-#from plane_dataset_scannet import PlaneDatasetScanNet
-#from augmentation import *
 from utils import *
 from skimage import measure
 import cv2
 import copy
+import os
 
+import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
 
-def lineRange2(line):
-    direction = calcLineDirection(line)
-    if direction < 2:
-        fixedValue = (line[0][1 - direction] + line[1][1 - direction]) // 2
-        minValue = min(line[0][direction], line[1][direction])
-        maxValue = max(line[0][direction], line[1][direction])
-        return direction, True, fixedValue, minValue, maxValue
-    else:
-        return direction, False, None, None, None
-
-def lineRange(line):
-    direction = calcLineDirection(line)
-    fixedValue = (line[0][1 - direction] + line[1][1 - direction]) // 2
-    minValue = min(line[0][direction], line[1][direction])
-    maxValue = max(line[0][direction], line[1][direction])
-    return direction, fixedValue, minValue, maxValue
-
-def pointDistance(point_1, point_2):
-    return max(abs(point_1[0] - point_2[0]), abs(point_1[1] - point_2[1]))
-
-# Euclidean distance between two points
-def p2p(p1, p2):
-    return ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
-
-# distance between point and line
-def p2l(p, l):
-    return min(pointDistance(p, l[i]) for i in range(2))
-
-# distance between line and line
-def l2l(l1, l2):
-    return min(pointDistance(l1[i], l2[j]) for i in range(2) for j in range(2))
-
-# intersection point between two lines
-def line(p1, p2):
-    A = (p1[1] - p2[1])
-    B = (p2[0] - p1[0])
-    C = (p1[0]*p2[1] - p2[0]*p1[1])
-    return A, B, -C
-
-def intersection(L1, L2):
-    D  = L1[0] * L2[1] - L1[1] * L2[0]
-    Dx = L1[2] * L2[1] - L1[1] * L2[2]
-    Dy = L1[0] * L2[2] - L1[2] * L2[0]
-    if D != 0:
-        x = Dx / D
-        y = Dy / D
-        return x,y
-    else:
-        return False
-
-# check if point in a line
-def pInLine(p, l, gap):
-    return abs(p2p(p, l[0]) + p2p(p, l[1]) - p2p(*l)) < gap*2
 
 def divideWalls(walls):
     horizontalWalls = []
@@ -73,75 +21,20 @@ def divideWalls(walls):
             horizontalWalls.append(wall)
         else:
             verticalWalls.append(wall)
-            pass
+            
         continue
     return horizontalWalls, verticalWalls
 
-def mergeLines(line_1, line_2):
-    direction_1, isMan_1, fixedValue_1, min_1, max_1 = lineRange(line_1)
-    direction_2, _, fixedValue_2, min_2, max_2 = lineRange(line_2)
-    if isMan_1:
-        fixedValue = (fixedValue_1 + fixedValue_2) // 2
-        if direction_1 == 0:
-            return [(min(min_1, min_2), fixedValue), (max(max_1, max_2), fixedValue)]
-        else:
-            return [(fixedValue, min(min_1, min_2)), (fixedValue, max(max_1, max_2))]
-    else:
-        if direction_1 == 3:
-            return [(min(line_1[0][0], line_2[1][0]), min(line_1[0][1], line_2[1][1])), 
-                    (min(line_1[0][0], line_2[1][0]), min(line_1[0][1], line_2[1][1]))]
-        else:
-            return [(max(line_1[0][0], line_2[1][0]), min(line_1[0][1], line_2[1][1])), 
-                    (min(line_1[0][0], line_2[1][0]), max(line_1[0][1], line_2[1][1]))]
+def findConnections(line_1, line_2, gap, fpath):
+    
+    if True:
+        def sele_ps_offline(c, l):
+            return l[0] if pointDistance(c, l[0]) > pointDistance(c, l[1]) else l[1]
 
-def findConnections(line_1, line_2, gap):
+        def sele_ps_inline(c, l):
+            return [p for p in l if pointDistance(c, p) > gap * 2]
 
-    isMan_1, isMan_2 = isManhattan(line_1), isManhattan(line_2)
-
-    if True or isMan_1 and isMan_2:
-
-        connection_1 = -1
-        connection_2 = -1
-        pointConnected = False
-        for c_1 in range(2):
-            if pointConnected:
-                break
-            for c_2 in range(2):
-                if pointDistance(line_1[c_1], line_2[c_2]) > gap:
-                    continue
-
-                connection_1 = c_1
-                connection_2 = c_2
-                connectionPoint = ((line_1[c_1][0] + line_2[c_2][0]) // 2, (line_1[c_1][1] + line_2[c_2][1]) // 2)
-                pointConnected = True
-                break
-            continue
-        if pointConnected:
-            return [connection_1, connection_2], connectionPoint
-        #direction_1, isMan_1, fixedValue_1, min_1, max_1 = lineRange(line_1)
-        #direction_2, isMan_2, fixedValue_2, min_2, max_2 = lineRange(line_2)
-
-        direction_1, fixedValue_1, min_1, max_1 = lineRange(line_1)
-        direction_2, fixedValue_2, min_2, max_2 = lineRange(line_2)
-
-
-        if direction_1 == direction_2:
-            return [-1, -1], (0, 0)
-
-        if min(fixedValue_1, max_2) < max(fixedValue_1, min_2) - gap or min(fixedValue_2, max_1) < max(fixedValue_2, min_1) - gap:
-            return [-1, -1], (0, 0)
-        if abs(min_1 - fixedValue_2) <= gap:
-            return [0, 2], (fixedValue_2, fixedValue_1)
-        if abs(max_1 - fixedValue_2) <= gap:
-            return [1, 2], (fixedValue_2, fixedValue_1)
-        if abs(min_2 - fixedValue_1) <= gap:
-            return [2, 0], (fixedValue_2, fixedValue_1)
-        if abs(max_2 - fixedValue_1) <= gap:
-            return [2, 1], (fixedValue_2, fixedValue_1)
-        return [2, 2], (fixedValue_2, fixedValue_1)
-    else:
-        pass
-        def p2d(c, ps):
+        def p2d(c, ps, f=1):
             d = []
             for p in ps:
                 direction = calcLineDirection((p, c))
@@ -153,36 +46,44 @@ def findConnections(line_1, line_2, gap):
                     d.append(6 if p[0] > c[0] and p[1] > c[1] else 4)
                 else:
                     d.append(7 if p[0] > c[0] and p[1] < c[1] else 5)
-            return d
+            return sorted(d)
 
-        #print('-'*20, line_1, line_2)
-        l1, l2 = line(*line_1), line(*line_2)
-        p = intersection(l1, l2)
+        p = interLine(line_1, line_2)
+        
         w1, w2 = pInLine(p, line_1, gap), pInLine(p, line_2, gap)
 
         if not w1 and not w2 and l2l(line_1, line_2) < gap:
-            return p2d(p, [line_1[0], line_2[0]]), p
-        elif w1 and not w2 and p2l(p, line_2) < gap:
-            return p2d(p, [line_1[0], line_1[1], line_2[0]]), p
-        elif not w1 and w2 and p2l(p, line_1) < gap:
-            return p2d(p, [line_1[0], line_2[1], line_2[0]]), p
-        elif w1 and w2:
-            ps = [l[i] for l in [line_1, line_2] for i in range(2) if pointDistance(p, l[i]) >= gap]
-            assert len(ps) > 1, 'Number of points is not enough !'
+            ps = [sele_ps_offline(p, l) for l in [line_1, line_2]]
             return p2d(p, ps), p
+        elif w1 and not w2 and p2l(p, line_2) < gap:
+            ps = sele_ps_inline(p, line_1) + [sele_ps_offline(p, line_2)]
+            return p2d(p, ps), p
+        elif not w1 and w2 and p2l(p, line_1) < gap:
+            ps = sele_ps_inline(p, line_2) + [sele_ps_offline(p, line_1)]
+            return p2d(p, ps, 0), p
+        elif w1 and w2:
+            ps1 = sele_ps_inline(p, line_1)
+            ps2 = sele_ps_inline(p, line_2)
+            if ps1 and ps2:
+                return p2d(p, ps1 + ps2), p
 
         return [-1, -1], (0, 0)
 
-def lines2Corners(lines, gap):
+def lines2Corners(fpath, lines, gap):
     success = True
+    corners = []
+    lineConnections = []
+    for _ in range(len(lines)):
+        lineConnections.append({})
+        continue
 
     connectionCornerMap = {}
 
     # Manhattan patterns (with comment)
-    connectionCornerMap[(1, 1)] = 4 # (0, 3)
+    connectionCornerMap[(0, 3)] = 4 # (0, 3)
     connectionCornerMap[(0, 1)] = 5 # (0, 1)
-    connectionCornerMap[(0, 0)] = 6 # (1, 2)
-    connectionCornerMap[(1, 0)] = 7 # (2, 3)
+    connectionCornerMap[(1, 2)] = 6 # (1, 2)
+    connectionCornerMap[(2, 3)] = 7 # (2, 3)
 
     # slant patterns
     connectionCornerMap[(2, 4)] = 8
@@ -210,10 +111,10 @@ def lines2Corners(lines, gap):
     connectionCornerMap[(1, 5)] = 26
     connectionCornerMap[(1, 6)] = 27
 
-    connectionCornerMap[(2, 0)] = 28 # (1, 2, 3)
-    connectionCornerMap[(1, 2)] = 29 # (0, 2, 3)
-    connectionCornerMap[(2, 1)] = 30 # (0, 1, 3)
-    connectionCornerMap[(0, 2)] = 31 # (0, 1, 2)
+    connectionCornerMap[(1, 2, 3)] = 28 # (1, 2, 3)
+    connectionCornerMap[(0, 2, 3)] = 29 # (0, 2, 3)
+    connectionCornerMap[(0, 1, 3)] = 30 # (0, 1, 3)
+    connectionCornerMap[(0, 1, 2)] = 31 # (0, 1, 2)
 
     connectionCornerMap[(0, 2, 4)] = 32
     connectionCornerMap[(0, 2, 7)] = 33
@@ -240,7 +141,7 @@ def lines2Corners(lines, gap):
     connectionCornerMap[(4, 6, 7)] = 50
     connectionCornerMap[(4, 5, 6)] = 51
 
-    connectionCornerMap[(2, 2)] = 52 # (0, 1, 2, 3)
+    connectionCornerMap[(0, 1, 2, 3)] = 52 # (0, 1, 2, 3)
     connectionCornerMap[(1, 3, 4, 6)] = 53
     connectionCornerMap[(1, 3, 5, 7)] = 54
     connectionCornerMap[(0, 2, 4, 6)] = 55
@@ -249,21 +150,31 @@ def lines2Corners(lines, gap):
 
 
     corners = []
-    for lineIndex_1 in range(len(lines)-1):
-        for lineIndex_2 in range(lineIndex_1+1, len(lines)):
-            line_1, line_2 = lines[lineIndex_1], lines[lineIndex_2]
-
-            if calcLineDirection(line_1) == calcLineDirection(line_2):
+    visited = []
+    for lineIndex_1, line_1 in enumerate(lines):
+        for lineIndex_2, line_2 in enumerate(lines):
+            if lineIndex_2 == lineIndex_1 or calcLineDirection(line_1) == calcLineDirection(line_2) or (lineIndex_2, lineIndex_1) in visited:
                 continue
-            
-            connections, connectionPoint = findConnections(line_1, line_2, gap=gap)
+            visited += [(lineIndex_1, lineIndex_2)]
+            connections, connectionPoint = findConnections(line_1, line_2, gap, fpath)
             if connections[0] == -1 and connections[1] == -1:
                 continue
-            if not isManhattan(line_1) or not isManhattan(line_2):
-                connections = sorted(connections)
-            corners.append((connectionPoint, connectionCornerMap[tuple(connections)]))
+
+            indices = [lineIndex_1, lineIndex_2]
+            for c in range(2):
+                if connections[c] in [0, 1] and connections[c] in lineConnections[indices[c]] and isManhattan(line_1) and isManhattan(line_2):
+                    success = False
+                    continue
+
+                lineConnections[indices[c]][connections[c]] = True
+                continue
+            try:
+                corners.append((connectionPoint, connectionCornerMap[tuple(connections)]))
+            except:
+                print(connections, line_1, line_2, fpath)
+                raise
             continue
-    print(corners)
+        continue
     return corners, success
 
 def getRoomLabelMap():
@@ -272,8 +183,8 @@ def getRoomLabelMap():
     labelMap['kitchen'] = 2
     labelMap['bedroom'] = 3
     labelMap['bathroom'] = 4
-    labelMap['restroom'] = 4
-    labelMap['washing_room'] = 4    
+    labelMap['restroom'] = 5
+    labelMap['washing_room'] = 9
     labelMap['office'] = 3
     labelMap['closet'] = 6
     labelMap['balcony'] = 7
@@ -312,7 +223,7 @@ def augmentSample(options, image, background_colors=[], split='train'):
     max_size = np.random.randint(low=int(options.width * 3 / 4), high=options.width + 1)
     if split != 'train':
         max_size = options.width
-        pass
+        
     image_sizes = np.array(image.shape[:2]).astype(np.float32)
     transformation = np.zeros((3, 3))
     transformation[0][0] = transformation[1][1] = float(max_size) / image_sizes.max()
@@ -323,12 +234,12 @@ def augmentSample(options, image, background_colors=[], split='train'):
         offset_x = 0
     else:
         offset_x = np.random.randint(options.width - image_sizes[1])
-        pass
+        
     if image_sizes[0] == options.height or split != 'train':
         offset_y = 0
     else:
         offset_y = np.random.randint(options.height - image_sizes[0])
-        pass
+        
 
     transformation[0][2] = offset_x
     transformation[1][2] = offset_y
@@ -337,9 +248,8 @@ def augmentSample(options, image, background_colors=[], split='train'):
         full_image = np.full((options.height, options.width, 3), fill_value=255)
     else:
         full_image = background_colors[np.random.choice(np.arange(len(background_colors), dtype=np.int32), options.width * options.height)].reshape((options.height, options.width, 3))
-        pass
         
-    #full_image = np.full((options.height, options.width, 3), fill_value=-1, dtype=np.float32)
+        
     full_image[offset_y:offset_y + image_sizes[0], offset_x:offset_x + image_sizes[1]] = cv2.resize(image, (image_sizes[1], image_sizes[0]))
     image = full_image
 
@@ -347,11 +257,9 @@ def augmentSample(options, image, background_colors=[], split='train'):
         image = np.ascontiguousarray(image[:, ::-1])
         transformation[0][0] *= -1
         transformation[0][2] = options.width - transformation[0][2]
-        pass
+        
     return image, transformation
 
-def convertToPoint(x, y):
-    return (int(round(float(x))), int(round(float(y))))
 
 def transformPoint(transformation, point):
     point = np.array(point)
@@ -361,12 +269,15 @@ def transformPoint(transformation, point):
 
 ## Plane dataset class
 class FloorplanDataset(Dataset):
-    def __init__(self, options, split, random=True):
+    def __init__(self, options, split, random=True, augment=False, test_batch=False, save_file=False):
         self.options = options
         self.split = split
         self.random = random
+        self.augment = augment
         self.imagePaths = []
-        self.dataFolder = '../data/'
+        self.dataFolder = '../tmp/random_100/'
+        self.test_batch = test_batch
+        self.save_file = save_file
         with open(self.dataFolder + split + '.txt') as f:
             for line in f:
                 self.imagePaths.append([value.strip() for value in line.split('\t')])
@@ -376,7 +287,7 @@ class FloorplanDataset(Dataset):
             self.numImages = options.numTrainingImages
         else:
             self.numImages = len(self.imagePaths)            
-            pass
+            
         self.labelMap = loadLabelMap()        
         return
     
@@ -393,28 +304,28 @@ class FloorplanDataset(Dataset):
             index = np.random.randint(len(self.imagePaths))
         else:
             index = index % len(self.imagePaths)
-            pass
+            
 
         debug = -1
         if debug >= 0:
             index = debug
             print(index, self.imagePaths[index][1])
-            pass
-        
+            
         image = cv2.imread(self.dataFolder + self.imagePaths[index][0])
+
+        if self.test_batch:
+          image, _ = augmentSample(self.options, image, background_colors=[], split=self.split)
+          image = (image.astype(np.float32) / 255 - 0.5).transpose((2, 0, 1))
+          return [image, self.imagePaths[index][0]]
+
         image_ori = image
         image_width, image_height = image.shape[1], image.shape[0]
 
-        #def transformPoint(x, y, resize=False):
-        #if resize:
-        #return (int(round(float(x) * self.options.width / image_width)), int(round(float(y) * self.options.height / image_height)))
-        #else:
-        #return (int(round(float(x))), int(round(float(y))))            
-        
         walls = []
         wall_types = []
         doors = []
         semantics = {}
+        fpath = self.imagePaths[index][1]
         with open(self.dataFolder + self.imagePaths[index][1]) as info_file:
             line_index = 0
             for line in info_file:
@@ -428,14 +339,12 @@ class FloorplanDataset(Dataset):
                 else:
                     if label not in semantics:
                         semantics[label] = []
-                        pass
+                        
                     semantics[label].append((convertToPoint(line[0], line[1]), convertToPoint(line[2], line[3])))
-                    pass
+                    
                 continue
-            pass
-
-        gap = 3
-        #print(semantics)
+            
+        gap = 5
         invalid_indices = {}
         for wall_index_1, (wall_1, wall_type_1) in enumerate(zip(walls, wall_types)):
             for wall_index_2, (wall_2, wall_type_2) in enumerate(zip(walls, wall_types)):
@@ -443,8 +352,8 @@ class FloorplanDataset(Dataset):
                     if min([pointDistance(wall_1[c_1], wall_2[c_2]) for c_1, c_2 in [(0, 0), (0, 1), (1, 0), (1, 1)]]) <= gap * 2:
                         walls[wall_index_1] = mergeLines(wall_1, wall_2)
                         invalid_indices[wall_index_2] = True
-                        pass
-                    pass
+                        
+                    
                 continue
             continue
         walls = [wall for wall_index, wall in enumerate(walls) if wall_index not in invalid_indices]
@@ -459,21 +368,15 @@ class FloorplanDataset(Dataset):
                     background_colors = image[background_mask == index]
                     break
                 continue
-            pass
+            
         
-        #walls = connectWalls(walls, roomSegmentation, gap=gap)
-        
-        corners, success = lines2Corners(walls, gap=gap)
-        if not success:
-            #print('warning', index, self.imagePaths[index][1])
-            pass
-
+        corners, success = lines2Corners(fpath, walls, gap=gap)
 
         if self.split == 'train':
             image, transformation = augmentSample(self.options, image, background_colors)
         else:
             image, transformation = augmentSample(self.options, image, background_colors, split=self.split)
-            pass
+            
         
         corners = [(transformPoint(transformation, corner[0]), corner[1]) for corner in corners]
         walls = [[transformPoint(transformation, wall[c]) for c in range(2)] for wall in walls]
@@ -484,13 +387,12 @@ class FloorplanDataset(Dataset):
 
         width = self.options.width
         height = self.options.height
-        
         roomSegmentation = np.zeros((height, width), dtype=np.uint8)
+        roomSegmentation2 = np.zeros((height, width, NUM_ROOMS+2), dtype=np.uint8)
         for line in walls:
-            #cv2.line(roomSegmentation, line[0], line[1], color=NUM_ROOMS + 1 + calcLineDirection(line), thickness=gap)
             cv2.line(roomSegmentation, line[0], line[1], color=NUM_ROOMS + 1, thickness=gap)
             continue
-
+        roomSegmentation2[:, :, NUM_ROOMS + 1][roomSegmentation == NUM_ROOMS + 1] = 1
         rooms = measure.label(roomSegmentation == 0, background=0)
         
         corner_gt = []
@@ -498,11 +400,11 @@ class FloorplanDataset(Dataset):
             corner_gt.append((corner[0][0], corner[0][1], corner[1] + 1))
             continue
 
-        openingCornerMap = [[3, 1], [0, 2]]
+        openingCornerMap = [[2, 0], [1, 3], [6, 4], [7, 5]]
         for opening in doors:
             direction = calcLineDirection(opening)
             for cornerIndex, corner in enumerate(opening):
-                corner_gt.append((int(round(corner[0])), int(round(corner[1])), 14 + openingCornerMap[direction][cornerIndex]))
+                corner_gt.append((int(round(corner[0])), int(round(corner[1])), 1 + NUM_WALL_CORNERS + openingCornerMap[direction][cornerIndex])) # 14
                 continue
             continue
 
@@ -513,10 +415,11 @@ class FloorplanDataset(Dataset):
                 break
             continue
         iconSegmentation = np.zeros((height, width), dtype=np.uint8)
+        iconSegmentation2 = np.zeros((height, width, NUM_ICONS + 2), dtype=np.uint8)
         for line in doors:
             cv2.line(iconSegmentation, line[0], line[1], color = self.labelMap['door'], thickness=gap - 1)
             continue
-
+        iconSegmentation2[:, :, self.labelMap['door']][iconSegmentation == self.labelMap['door']] = 1
         roomLabelMap = {}
         for semantic, items in semantics.items():
             group, label = self.labelMap[semantic]
@@ -525,64 +428,96 @@ class FloorplanDataset(Dataset):
                     if label == 0:
                         continue
                     cv2.rectangle(iconSegmentation, (int(round(corners[0][0])), int(round(corners[0][1]))), (int(round(corners[1][0])), int(round(corners[1][1]))), color=label, thickness=-1)
-                    corner_gt.append((corners[0][0], corners[0][1], 18 + 2))
-                    corner_gt.append((corners[0][0], corners[1][1], 18 + 1))
-                    corner_gt.append((corners[1][0], corners[0][1], 18 + 3))
-                    corner_gt.append((corners[1][0], corners[1][1], 18 + 0))
+                    x0, x1, y0, y1 = int(round(corners[0][0])), int(round(corners[1][0])), int(round(corners[0][1])), int(round(corners[1][1]))
+                    x0, x1, y0, y1 = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
+                    iconSegmentation2[:, :, label][y0: y1+1, x0: x1+1] = 1
+                    corner_gt.append((corners[0][0], corners[0][1], 9 + NUM_WALL_CORNERS + 2)) # 18
+                    corner_gt.append((corners[0][0], corners[1][1], 9 + NUM_WALL_CORNERS + 1))
+                    corner_gt.append((corners[1][0], corners[0][1], 9 + NUM_WALL_CORNERS + 3))
+                    corner_gt.append((corners[1][0], corners[1][1], 9 + NUM_WALL_CORNERS + 0))
                 else:
                     roomIndex = rooms[(corners[0][1] + corners[1][1]) // 2][(corners[0][0] + corners[1][0]) // 2]
                     if roomIndex == wallIndex or roomIndex == backgroundIndex:
-                        #if roomIndex == backgroundIndex:
-                        #print('label on background', corners, semantic, index, self.imagePaths[index][1])
-                        #pass
                         continue
                     if roomIndex in roomLabelMap:
-                        #print('room has more than one labels', corners, label, roomLabelMap[roomIndex])
-                        #exit(1)
                         continue
-                        pass
                     roomLabelMap[roomIndex] = label
                     roomSegmentation[rooms == roomIndex] = label
-                    pass
+                    roomSegmentation2[:, :, label][rooms == roomIndex] = 1
+                    
                 continue
             continue
         
-        #print(roomLabelMap)
         if debug >= 0:
             cv2.imwrite('test/floorplan/rooms.png', drawSegmentationImage(rooms, blackIndex=backgroundIndex))
             exit(1)
-            pass
+            
         
         for roomIndex in range(rooms.min(), rooms.max() + 1):
             if roomIndex == wallIndex or roomIndex == backgroundIndex:
                 continue
             if roomIndex not in roomLabelMap:
                 roomSegmentation[rooms == roomIndex] = 10
-                #print('room has no label', roomIndex, rooms.max(), np.stack((rooms == roomIndex).nonzero(), axis=-1).mean(0)[::-1])
-                #exit(1)
-                pass
+                roomSegmentation2[:, :, 10][rooms == roomIndex] = 1
+                
             continue
 
-        cornerSegmentation = np.zeros((height, width, 66), dtype=np.uint8)
+        cornerSegmentation = np.zeros((height, width, NUM_CORNERS), dtype=np.uint8)
         for corner in corner_gt:
             cornerSegmentation[min(max(corner[1], 0), height - 1), min(max(corner[0], 0), width - 1), corner[2] - 1] = 1
             continue
 
-        if False:
-            cv2.imwrite('test/image.png', image_ori)
-            cv2.imwrite('test/icon_segmentation.png', drawSegmentationImage(iconSegmentation))
-            cv2.imwrite('test/room_segmentation.png', drawSegmentationImage(roomSegmentation))
-            cv2.imwrite('test/corner_segmentation.png', drawSegmentationImage(cornerSegmentation, blackIndex=0))
-            print([(seg.min(), seg.max(), seg.shape) for seg in [cornerSegmentation, iconSegmentation, roomSegmentation]])
-            exit(1)            
-            pass
+        # data augmentation
+        if self.split == 'train' and self.augment:
+          img_dtype = None
+          if image.dtype != np.uint8:
+            img_dtype = image.dtype
 
+          # random rotations
+          if np.random.randint(2) == 0:
+            #ang = np.random.randint(360)
+            ang = np.random.choice([90, -90])
+            image = np.dstack([F.rotate(np2pil(image[:, :, i]), ang) for i in range(3)])
+            cornerSegmentation = np.dstack([F.rotate(np2pil(cornerSegmentation[:, :, i]), ang) for i in range(NUM_CORNERS)])
+            iconSegmentation = np.dstack([F.rotate(np2pil(iconSegmentation[:, :, i]), ang) for i in range(NUM_ICONS + 2)])
+            roomSegmentation = np.dstack([F.rotate(np2pil(roomSegmentation[:, :, i]), ang) for i in range(NUM_ROOMS + 2)])
 
-        image = (image.astype(np.float32) / 255 - 0.5).transpose((2, 0, 1))
+          # random h-flips
+          if np.random.randint(2) == 0:
+              image = np.dstack([F.hflip(np2pil(image[:, :, i])) for i in range(3)])
+              cornerSegmentation = np.dstack([F.hflip(np2pil(cornerSegmentation[:, :, i])) for i in range(NUM_CORNERS)])
+              iconSegmentation = np.dstack([F.hflip(np2pil(iconSegmentation[:, :, i])) for i in range(NUM_ICONS + 2)])
+              roomSegmentation = np.dstack([F.hflip(np2pil(roomSegmentation[:, :, i])) for i in range(NUM_ROOMS + 2)])
+
+          # random v-flips
+          if np.random.randint(2) == 0:
+              image = np.dstack([F.vflip(np2pil(image[:, :, i])) for i in range(3)])
+              cornerSegmentation = np.dstack([F.vflip(np2pil(cornerSegmentation[:, :, i])) for i in range(NUM_CORNERS)])
+              iconSegmentation = np.dstack([F.vflip(np2pil(iconSegmentation[:, :, i])) for i in range(NUM_ICONS + 2)])
+              roomSegmentation = np.dstack([F.vflip(np2pil(roomSegmentation[:, :, i])) for i in range(NUM_ROOMS + 2)])
+
+          # random crops
+          if np.random.randint(2) == 0:
+            i, j, h, w = transforms.RandomCrop.get_params(np2pil(cornerSegmentation), output_size=(height//2, width//2))
+            image = np.dstack([F.resized_crop(np2pil(image[:, :, ii]), i, j, h, w, (height, width)) for ii in range(3)])
+            cornerSegmentation = np.dstack([F.resized_crop(np2pil(cornerSegmentation[:, :, ii]), i, j, h, w, (height, width)) for ii in range(NUM_CORNERS)])
+            iconSegmentation = np.dstack([F.resized_crop(np2pil(iconSegmentation[:, :, ii]), i, j, h, w, (height, width)) for ii in range(NUM_ICONS + 2)])
+            roomSegmentation = np.dstack([F.resized_crop(np2pil(roomSegmentation[:, :, ii]), i, j, h, w, (height, width)) for ii in range(NUM_ROOMS + 2)])
+
+          if img_dtype:
+            image = image.astype(img_dtype)
+        image = image.transpose((2, 0, 1))
         kernel = np.zeros((3, 3), dtype=np.uint8)
         kernel[1] = 1
         kernel[:, 1] = 1
         cornerSegmentation = cv2.dilate(cornerSegmentation, kernel, iterations=5)
 
-        sample = [image, cornerSegmentation.astype(np.float32), iconSegmentation.astype(np.int64), roomSegmentation.astype(np.int64)]
+        sample = [image, cornerSegmentation.astype(np.float32), iconSegmentation.astype(np.float32), roomSegmentation.astype(np.float32)]
+        
+        if self.save_file:
+          img_name = os.path.splitext(self.imagePaths[index][0])[0].split('/')[-1]
+          for name, s in zip(['image', 'corner', 'icon', 'room'], sample):
+            if name == 'icon':
+                np.save('./label_data/%s_%s.npy' % (name, img_name), s)
+
         return sample
