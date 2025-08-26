@@ -24,29 +24,33 @@ def main(options):
         os.system("mkdir -p %s"%options.test_dir)
         pass
 
-    model = Model(options)
-    model.cuda()
+    # Device setup
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f'Using device: {device}')
+
+    model = Model(options, pretrained=True)  # Use pretrained for training
+    model.to(device)
     model.train()
 
     base = 'best'
 
     if options.restore == 1:
         print('restore from ' + options.checkpoint_dir + '/checkpoint_%s.pth' % (base))
-        model.load_state_dict(torch.load(options.checkpoint_dir + '/checkpoint_%s.pth' % (base)))
+        model.load_state_dict(torch.load(options.checkpoint_dir + '/checkpoint_%s.pth' % (base), map_location=device))
         pass
     
     if options.task == 'test':
         print('-'*20, 'test')
         dataset_test = FloorplanDataset(options, split='test_3', random=False)
         print('the number of test images', len(dataset_test))    
-        testOneEpoch(options, model, dataset_test)
+        testOneEpoch(options, model, dataset_test, device)
         exit(1)
  
     if options.task == 'test_batch':
         print('-'*20, 'test_batch')
         dataset_test = FloorplanDataset(options, split='test_batch', random=False, test_batch=True)
         print('the number of test_batch images', len(dataset_test))    
-        testBatch_unet(options, model, dataset_test)
+        testBatch_unet(options, model, dataset_test, device)
         exit(1)
 
     dataset = FloorplanDataset(options, split='sb_train++', random=True, augment=options.augment)
@@ -68,7 +72,7 @@ def main(options):
           for sampleIndex, sample in enumerate(data_iterator):
               optimizer.zero_grad()
             
-              images, corner_gt, icon_gt, room_gt = sample[0].cuda(), sample[1].cuda(), sample[2].cuda(), sample[3].cuda()
+              images, corner_gt, icon_gt, room_gt = sample[0].to(device), sample[1].to(device), sample[2].to(device), sample[3].to(device)
 
               corner_pred, icon_pred, room_pred = model(images)
               #print([(v.shape, v.min(), v.max()) for v in [corner_pred, icon_pred, room_pred, corner_gt, icon_gt, room_gt]])
@@ -116,7 +120,7 @@ def main(options):
           continue
       return
 
-def testOneEpoch(options, model, dataset):
+def testOneEpoch(options, model, dataset, device):
     model.eval()
     
     dataloader = DataLoader(dataset, batch_size=options.batchSize, shuffle=False, num_workers=1)
@@ -125,7 +129,7 @@ def testOneEpoch(options, model, dataset):
     data_iterator = tqdm(dataloader, total=len(dataset) // options.batchSize + 1)
     for sampleIndex, sample in enumerate(data_iterator):
 
-        images, corner_gt, icon_gt, room_gt = sample[0].cuda(), sample[1].cuda(), sample[2].cuda(), sample[3].cuda()
+        images, corner_gt, icon_gt, room_gt = sample[0].to(device), sample[1].to(device), sample[2].to(device), sample[3].to(device)
         
         corner_pred, icon_pred, room_pred = model(images)
         '''
@@ -172,7 +176,7 @@ def testOneEpoch(options, model, dataset):
     model.train()
     return
 
-def testBatch_unet(options, model, dataset):
+def testBatch_unet(options, model, dataset, device):
     model.eval()
 
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=16)
@@ -180,7 +184,7 @@ def testBatch_unet(options, model, dataset):
 
     data_iterator = tqdm(dataloader, total=len(dataset))
     for sampleIndex, sample in enumerate(data_iterator):
-        images, img_path = sample[0].cuda(), sample[1][0]
+        images, img_path = sample[0].to(device), sample[1][0]
         img_name = os.path.splitext(img_path)[0].split('/')[-1]
 
         corner_pred, icon_pred, room_pred = model(images)
@@ -209,14 +213,14 @@ def testBatch_unet(options, model, dataset):
     return
 
 
-def testBatch(options, model, dataset):
+def testBatch(options, model, dataset, device):
     model.eval()
     
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=16)
 
     data_iterator = tqdm(dataloader, total=len(dataset))
     for sampleIndex, sample in enumerate(data_iterator):
-        images, img_path = sample[0].cuda(), sample[1][0]
+        images, img_path = sample[0].to(device), sample[1][0]
         img_name = os.path.splitext(img_path)[0].split('/')[-1]
 
         corner_pred, icon_pred, room_pred = model(images)
